@@ -1,0 +1,209 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "library"
+}
+
+enum Role {
+  ADMIN
+  TENANT
+  OWNER
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
+}
+
+enum ListingStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  ARCHIVED
+}
+
+enum RefundStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id                    String              @id @default(uuid())
+  email                 String              @unique
+  passwordHash          String?
+  googleId              String?             @unique
+  role                  Role
+  fullName              String?
+  isVerified            Boolean             @default(false)
+  isBanned              Boolean             @default(false)
+  banReason             String?
+  verificationStatus    VerificationStatus  @default(UNVERIFIED)
+  otp                   String? 
+  otpExpiry             DateTime?
+  otpAttempts           Int       @default(0)
+  otpLastSentAt         DateTime?
+  
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  // Relocation/Tenant Fields
+  currentCountry        String?
+  destinationCountry    String?             @default("Canada")
+  currentStatus         String?
+  visaStatus            String?
+  visaType              String?
+  plannedMoveDate       String?
+  purposeOfRelocation   String?
+  expectedRentalDuration String?
+  residencyStatus       String?
+
+  // Urgent Match Premium Option
+  isUrgentMatch         Boolean             @default(false)
+  urgentMatchRequestedAt DateTime?
+
+  // Relations
+  verificationRequest   VerificationRequest?
+  listings              Listing[]           @relation("OwnerListings")
+  savedListings         SavedListing[]
+  subscriptions         Subscription[]
+  tenantApproaches      Approach[]          @relation("TenantApproaches")
+  ownerApproaches       Approach[]          @relation("OwnerApproaches")
+  
+  // Chat Relations
+  chatRoomsAsTenant     ChatRoom[]          @relation("TenantRooms")
+  chatRoomsAsOwner      ChatRoom[]          @relation("OwnerRooms")
+  sentMessages          ChatMessage[]       @relation("SentMessages")
+  
+  refundRequests        RefundRequest[]
+}
+
+model VerificationRequest {
+  id                   String             @id @default(uuid())
+  userId               String             @unique
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  residencyStatus      String
+  documentUrls         String[]
+  documentTypes        String[]
+  declarationsAccepted Boolean            @default(false)
+  adminNotes           String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+}
+
+model Listing {
+  id               String         @id @default(uuid())
+  ownerId          String
+  owner            User           @relation("OwnerListings", fields: [ownerId], references: [id], onDelete: Cascade)
+  title            String
+  description      String
+  rent             Float
+  location         String
+  city             String?
+  photos           String[]
+  bedrooms         Int
+  bathrooms        Int
+  availabilityDate DateTime
+  status           ListingStatus  @default(DRAFT)
+  adminFeedback    String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  savedBy          SavedListing[]
+  approaches       Approach[]
+  chatRooms        ChatRoom[]
+}
+
+model SavedListing {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, listingId])
+}
+
+model Subscription {
+  id                String          @id @default(uuid())
+  userId            String
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId            String          // e.g. plan_14_days_sub, plan_30_days_one_time, etc.
+  name              String
+  price             Float
+  durationDays      Int
+  isSubscription    Boolean         @default(false)
+  approachesAllowed Int             // Max approaches, e.g. 5, 15, 30, -1 for unlimited
+  approachesUsed    Int             @default(0)
+  startDate         DateTime        @default(now())
+  endDate           DateTime
+  isActive          Boolean         @default(false)
+  status            String          @default("PENDING")
+  createdAt         DateTime        @default(now())
+  
+  refundRequests    RefundRequest[]
+}
+
+model Approach {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    User     @relation("TenantApproaches", fields: [tenantId], references: [id], onDelete: Cascade)
+  ownerId   String
+  owner     User     @relation("OwnerApproaches", fields: [ownerId], references: [id], onDelete: Cascade)
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, listingId])
+}
+
+model ChatRoom {
+  id        String        @id @default(uuid())
+  tenantId  String
+  tenant    User          @relation("TenantRooms", fields: [tenantId], references: [id], onDelete: Cascade)
+  ownerId   String
+  owner     User          @relation("OwnerRooms", fields: [ownerId], references: [id], onDelete: Cascade)
+  listingId String
+  listing   Listing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  createdAt DateTime      @default(now())
+  messages  ChatMessage[]
+
+  @@unique([tenantId, ownerId, listingId])
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  roomId    String
+  room      ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  senderId  String
+  sender    User     @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime @default(now())
+}
+
+model RefundRequest {
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionId String
+  subscription   Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  status         RefundStatus  @default(PENDING)
+  reason         String?
+  adminNotes     String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model CmsPage {
+  id        String   @id
+  title     String
+  content   String
+  updatedAt DateTime @updatedAt
+}
