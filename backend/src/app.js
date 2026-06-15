@@ -35,7 +35,7 @@ const subscriptionRoutes = require("./routes/subscription.routes");
 const verificationRoutes = require("./routes/verification.routes");
 const cmsRoutes = require("./routes/cms.routes");
 
-const DEFAULT_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"];
+const DEFAULT_ORIGINS = ["https://nextarrival-backend.onrender.com", "http://localhost:3000", "http://127.0.0.1:3000"];
 const envOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
