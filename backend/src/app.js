@@ -84,10 +84,12 @@ app.use(
 );
 app.use(express.json({ limit: "10kb" })); // limit request body size
 app.use(cookieParser()); // parse Cookie header into req.cookies
-
+app.use(express.urlencoded({ extended: true, limit: "10kb" })); // parse URL-encoded bodies
 // Serve uploaded files (e.g. verification docs, listing photos)
 app.use("/uploads", express.static(uploadDir, { dotfiles: "deny" }));
-
+app.use("/test",(req,res) => {
+  res.send("Welcome to the backend API. Please use the /api endpoints for requests.");
+});
 // Health check stays DB-independent so load balancers can test process liveness.
 app.get("/api/health", publicLimiter, (req, res) => {
   res.status(200).json({
