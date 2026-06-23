@@ -239,7 +239,10 @@ model InterestRequest {
   owner            User                  @relation("OwnerInterestRequests", fields: [ownerId], references: [id], onDelete: Cascade)
   propertyId       String
   property         Listing               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  tenantMessage    String
   status           InterestRequestStatus @default(PENDING)
+  ownerMessage     String?
+  respondedAt      DateTime?
   profileSnapshot  Json
   propertySnapshot Json
   createdAt        DateTime              @default(now())
@@ -383,3 +386,4 @@ model PartnerInquiry {
   @@index([status, createdAt])
   @@index([email])
 }
+

@@ -119,10 +119,14 @@ function createInterestChatMessage(prisma, data) {
   });
 }
 
-function updateInterestStatus(prisma, { id, status, expectedStatus = "PENDING" }) {
+function updateInterestStatus(prisma, { id, status, ownerMessage, expectedStatus = "PENDING" }) {
   return prisma.interestRequest.update({
     where: { id, status: expectedStatus },
-    data: { status },
+    data: {
+      status,
+      ownerMessage: ownerMessage || null,
+      respondedAt: new Date(),
+    },
     include: INTEREST_INCLUDE,
   });
 }
@@ -154,3 +158,4 @@ module.exports = {
   updateInterestStatus,
   incrementApproachUsage,
 };
+

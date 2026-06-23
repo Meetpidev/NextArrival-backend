@@ -237,11 +237,8 @@ exports.initiateChat = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Interest request sent successfully",
-      roomId: result.chatRoom.id,
       data: {
         interestRequest: result.interestRequest,
-        chatRoomId: result.chatRoom.id,
-        chatMessage: result.chatMessage,
       },
     });
   } catch (err) {
@@ -251,3 +248,4 @@ exports.initiateChat = async (req, res) => {
     return sendInterestError(res, err);
   }
 };
+

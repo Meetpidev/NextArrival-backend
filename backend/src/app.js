@@ -114,6 +114,7 @@ app.use("/api/cms", publicLimiter);
 app.use("/api/contact", publicLimiter);
 app.use("/api/partner", publicLimiter);
 app.use("/api/interests", publicLimiter);
+app.use("/api/inquiries", publicLimiter);
 app.use("/api/notifications", publicLimiter);
 app.use("/api/admin", adminLimiter);
 
@@ -125,6 +126,7 @@ app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/cms", cmsRoutes);
 app.use("/api/interests", interestRoutes);
+app.use("/api/inquiries", interestRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api", inquiryRoutes);
 
@@ -167,3 +169,4 @@ app.use((err, req, res, next) => {
 });
 
 module.exports = { app };
+
