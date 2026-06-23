@@ -30,6 +30,7 @@ const {
 } = require("../services/adminInquiry.service");
 const { getAdminNotifications } = require("../services/notification.service");
 const { sendPartnerDecisionEmail } = require("../services/mail.service");
+const googleSheetsService = require("../services/googleSheets.service");
 
 exports.getAnalytics = async (req, res) => {
   try {
@@ -530,6 +531,19 @@ exports.updatePartnerRequestStatus = async (req, res) => {
     }
 
     const request = await updatePartnerRequestStatus({ id, status });
+
+    if (status === "ACCEPTED") {
+      try {
+        const inserted = await googleSheetsService.addAcceptedPartnerToSheet(current);
+        if (!inserted) {
+          console.error(
+            `Accepted partner ${current.id} was saved in the database but not appended to Google Sheets`,
+          );
+        }
+      } catch (sheetError) {
+        console.error("Failed to append accepted partner to Google Sheet:", sheetError);
+      }
+    }
 
     try {
       await sendPartnerDecisionEmail(current.email, {
