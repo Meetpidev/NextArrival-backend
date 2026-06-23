@@ -75,13 +75,7 @@ app.use(
     },
   }),
 );
-app.use(
-  cors({
-    // Explicit allowed origins (local + optionally CORS_ORIGINS)
-    origin: allowedOrigins,
-    credentials: true, // enables cookie-based auth
-  }),
-);
+app.use(cors());
 app.use(express.json({ limit: "10kb" })); // limit request body size
 app.use(cookieParser()); // parse Cookie header into req.cookies
 app.use(express.urlencoded({ extended: true, limit: "10kb" })); // parse URL-encoded bodies
