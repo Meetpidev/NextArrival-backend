@@ -256,6 +256,10 @@ const contactUsSchema = z.object({
     .min(2, "Full name must be at least 2 characters")
     .max(100),
   email: normalizedEmail,
+  phone: z
+    .string()
+    .trim()
+    .regex(/^\+\d{7,15}$/, "Phone number must be in international format, for example +14165550123"),
   destinationCity: optionalText(120),
   visaStatus: optionalText(120),
   subject: z
@@ -313,7 +317,7 @@ const adminInquiryQuerySchema = z.object({
     .string()
     .trim()
     .transform((value) => value.toUpperCase())
-    .pipe(z.enum(["PENDING", "REVIEWED", "RESOLVED", "REJECTED"]))
+    .pipe(z.enum(["PENDING", "ACCEPTED", "REJECTED"]))
     .optional(),
 });
 
@@ -322,7 +326,7 @@ const adminInquiryStatusSchema = z.object({
     .string()
     .trim()
     .transform((value) => value.toUpperCase())
-    .pipe(z.enum(["PENDING", "REVIEWED", "RESOLVED", "REJECTED"])),
+    .pipe(z.enum(["PENDING", "ACCEPTED", "REJECTED", "RESOLVED", "DELETED"])),
 });
 
 const adminInquiryIdParamSchema = z.object({

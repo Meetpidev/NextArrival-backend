@@ -36,9 +36,19 @@ async function updatePartnerRequestStatus({ id, status }) {
   return repo.updatePartnerRequestStatus(prisma, { id, status });
 }
 
+async function listAcceptedPartners(query) {
+  const [total, partners] = await repo.listAcceptedPartners(prisma, query);
+
+  return {
+    partners,
+    pagination: buildPagination(total, query.page, query.limit),
+  };
+}
+
 module.exports = {
   listContactInquiries,
   updateContactInquiryStatus,
   listPartnerRequests,
   updatePartnerRequestStatus,
+  listAcceptedPartners,
 };

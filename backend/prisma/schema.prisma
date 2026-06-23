@@ -352,6 +352,7 @@ model ContactUs {
   whoAreYou       String
   fullName        String
   email           String
+  phone           String?
   destinationCity String?
   visaStatus      String?
   subject         String

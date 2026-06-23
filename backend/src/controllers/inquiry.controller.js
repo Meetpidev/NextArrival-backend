@@ -1,4 +1,5 @@
 const { prisma } = require("../config/db");
+const crypto = require("crypto");
 const {
   contactUsSchema,
   partnerWithUsSchema,
@@ -12,6 +13,9 @@ const {
   createAdminNotification,
   enqueueNotificationJob,
 } = require("../services/notification.service");
+const {
+  sendPartnerDecisionEmail,
+} = require("../services/mail.service");
 
 function nullableText(value) {
   if (typeof value !== "string") {
@@ -73,18 +77,38 @@ exports.submitContactUs = async (req, res) => {
   try {
     const data = contactUsSchema.parse(req.body);
 
-    const contactUs = await prisma.contactUs.create({
-      data: {
-        whoAreYou: data.whoAreYou,
-        fullName: data.fullName,
-        email: data.email,
-        destinationCity: nullableText(data.destinationCity),
-        visaStatus: nullableText(data.visaStatus),
-        subject: data.subject,
-        messageDetail: data.messageDetail,
-      },
-      select: { id: true, createdAt: true },
-    });
+    const contactRows = await prisma.$queryRaw`
+      INSERT INTO "ContactUs" (
+        "id",
+        "whoAreYou",
+        "fullName",
+        "email",
+        "phone",
+        "destinationCity",
+        "visaStatus",
+        "subject",
+        "messageDetail",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ) VALUES (
+        ${crypto.randomUUID()},
+        ${data.whoAreYou},
+        ${data.fullName},
+        ${data.email},
+        ${data.phone},
+        ${nullableText(data.destinationCity)},
+        ${nullableText(data.visaStatus)},
+        ${data.subject},
+        ${data.messageDetail},
+        'PENDING',
+        NOW(),
+        NOW()
+      )
+      RETURNING "id", "createdAt"
+    `;
+
+    const contactUs = contactRows[0];
 
     await notifyAdminsOfInquiry({
       recordId: contactUs.id,
@@ -103,6 +127,8 @@ exports.submitContactUs = async (req, res) => {
     if (isZodError(err)) {
       return sendValidationError(res, err);
     }
+
+    console.error("[ContactUs] Submission failed:", err);
 
     return sendServerError(
       res,
@@ -150,10 +176,47 @@ exports.submitPartnerWithUs = async (req, res) => {
       return sendValidationError(res, err);
     }
 
+    console.error("[PartnerInquiry] Submission failed:", err);
+
     return sendServerError(
       res,
       "Partner inquiry error: " + err.message,
       "Unable to submit partner inquiry. Please try again.",
+    );
+  }
+};
+
+exports.getAcceptedPartners = async (req, res) => {
+  try {
+    const partners = await prisma.partnerInquiry.findMany({
+      where: { status: "ACCEPTED" },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        partnershipType: true,
+        organizationName: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        country: true,
+        cityRegion: true,
+        partnershipGoal: true,
+        tellUsMore: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
+    return res.json({
+      success: true,
+      message: "Accepted partners retrieved successfully",
+      data: { partners },
+    });
+  } catch (err) {
+    return sendServerError(
+      res,
+      "Accepted partner retrieval error: " + err.message,
+      "Unable to fetch accepted partners.",
     );
   }
 };

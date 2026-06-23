@@ -47,6 +47,7 @@ router.patch(
   ctrl.updateContactInquiryStatus,
 );
 router.get("/partner-requests", requireAuth, requireRole("ADMIN"), ctrl.getPartnerRequests);
+router.get("/accepted-partners", requireAuth, requireRole("ADMIN"), ctrl.getAcceptedPartners);
 router.patch(
   "/partner-requests/:id/status",
   requireAuth,

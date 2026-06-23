@@ -26,8 +26,10 @@ const {
   updateContactInquiryStatus,
   listPartnerRequests,
   updatePartnerRequestStatus,
+  listAcceptedPartners,
 } = require("../services/adminInquiry.service");
 const { getAdminNotifications } = require("../services/notification.service");
+const { sendPartnerDecisionEmail } = require("../services/mail.service");
 
 exports.getAnalytics = async (req, res) => {
   try {
@@ -509,7 +511,35 @@ exports.updatePartnerRequestStatus = async (req, res) => {
   try {
     const { id } = adminInquiryIdParamSchema.parse(req.params);
     const { status } = adminInquiryStatusSchema.parse(req.body);
+    const current = await prisma.partnerInquiry.findUnique({
+      where: { id },
+    });
+
+    if (!current) {
+      return res.status(404).json({
+        success: false,
+        error: "Partner request not found",
+      });
+    }
+
+    if (!["ACCEPTED", "REJECTED"].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: "Partner status must be ACCEPTED or REJECTED",
+      });
+    }
+
     const request = await updatePartnerRequestStatus({ id, status });
+
+    try {
+      await sendPartnerDecisionEmail(current.email, {
+        organizationName: current.organizationName,
+        fullName: current.fullName,
+        status,
+      });
+    } catch (mailError) {
+      console.error("Partner decision email failed:", mailError);
+    }
 
     return res.json({
       success: true,
@@ -527,6 +557,24 @@ exports.updatePartnerRequestStatus = async (req, res) => {
       });
     }
     return sendServerError(res, err, "Failed to update partner request");
+  }
+};
+
+exports.getAcceptedPartners = async (req, res) => {
+  try {
+    const query = adminInquiryQuerySchema.parse(req.query);
+    const data = await listAcceptedPartners(query);
+
+    return res.json({
+      success: true,
+      message: "Accepted partners retrieved successfully",
+      data,
+    });
+  } catch (err) {
+    if (isZodError(err)) {
+      return sendValidationError(res, err);
+    }
+    return sendServerError(res, err, "Failed to fetch accepted partners");
   }
 };
 

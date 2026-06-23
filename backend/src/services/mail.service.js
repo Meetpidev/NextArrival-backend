@@ -1,21 +1,42 @@
+const nodemailer = require("nodemailer");
 const { Resend } = require("resend");
 
-const DEFAULT_FROM = "NestArrival Verification <no-reply@nestarrival.ca>";
+const DEFAULT_FROM = "NestArrival <no-reply@nestarrival.ca>";
 const OTP_TTL_MINUTES = 15;
 
-function requireMailConfig() {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.RESEND_FROM || DEFAULT_FROM;
+function getMailConfig() {
+  const from = process.env.MAIL_FROM || process.env.RESEND_FROM || DEFAULT_FROM;
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = Number(process.env.SMTP_PORT || 587);
+  const smtpSecure = process.env.SMTP_SECURE === "true";
+  const smtpUser = process.env.SMTP_USER;
+  const smtpPass = process.env.SMTP_PASS;
+  const resendApiKey = process.env.RESEND_API_KEY;
 
-  if (!apiKey) {
-    return { configured: false };
+  if (smtpHost && smtpUser && smtpPass) {
+    return {
+      configured: true,
+      provider: "smtp",
+      from,
+      smtp: {
+        host: smtpHost,
+        port: Number.isFinite(smtpPort) ? smtpPort : 587,
+        secure: smtpSecure,
+        auth: { user: smtpUser, pass: smtpPass },
+      },
+    };
   }
 
-  return {
-    configured: true,
-    apiKey,
-    from,
-  };
+  if (resendApiKey) {
+    return {
+      configured: true,
+      provider: "resend",
+      from,
+      resendApiKey,
+    };
+  }
+
+  return { configured: false };
 }
 
 function maskEmail(email) {
@@ -32,28 +53,53 @@ function logConsoleOtp({ label, email, otp, reason }) {
   console.log(`==================================================\n`);
 }
 
-async function sendOtpEmail({ email, otp, content, successLabel }) {
-  const config = requireMailConfig();
+function logConsoleMail({ label, email, reason }) {
+  console.log(`\n==================================================`);
+  console.log(label);
+  console.log(`To: ${email}`);
+  console.log(`Status: ${reason}. Printed for local testing.`);
+  console.log(`==================================================\n`);
+}
+
+async function sendMail({ email, content, successLabel, otp = null }) {
+  const config = getMailConfig();
 
   if (!config.configured) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error("RESEND_API_KEY is not configured");
-    }
-
     if (process.env.ALLOW_CONSOLE_OTP === "true") {
-      logConsoleOtp({
-        label: successLabel.console,
-        email,
-        otp,
-        reason: "Resend API key missing",
-      });
+      if (otp) {
+        logConsoleOtp({
+          label: successLabel.console,
+          email,
+          otp,
+          reason: "Email service is not configured",
+        });
+      } else {
+        logConsoleMail({
+          label: successLabel.console,
+          email,
+          reason: "Email service is not configured",
+        });
+      }
       return true;
     }
 
-    throw new Error("RESEND_API_KEY is not configured");
+    throw new Error("Email service is not configured");
   }
 
-  const resend = new Resend(config.apiKey);
+  if (config.provider === "smtp") {
+    const transporter = nodemailer.createTransport(config.smtp);
+    await transporter.sendMail({
+      from: config.from,
+      to: email,
+      subject: content.subject,
+      text: content.text,
+      html: content.html,
+    });
+    console.log(`[NestArrival SMTP] ${successLabel.sent} sent to ${maskEmail(email)}`);
+    return true;
+  }
+
+  const resend = new Resend(config.resendApiKey);
   const { data, error } = await resend.emails.send({
     from: config.from,
     to: [email],
@@ -75,65 +121,36 @@ async function sendOtpEmail({ email, otp, content, successLabel }) {
 }
 
 function buildOtpEmail(otp) {
-  // Table-based markup is more reliable across Gmail, Outlook, and mobile apps.
   const html = `
     <!doctype html>
     <html lang="en">
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="color-scheme" content="light">
-        <meta name="supported-color-schemes" content="light">
-        <title>NestArrival email verification</title>
-      </head>
-      <body style="margin: 0; padding: 0; background-color: #f6f8fb; font-family: Arial, Helvetica, sans-serif; color: #0f172a;">
-        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f6f8fb; margin: 0; padding: 32px 12px;">
+      <body style="margin:0;padding:0;background:#f6f8fb;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f8fb;padding:32px 12px;">
           <tr>
             <td align="center">
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
                 <tr>
-                  <td style="padding: 28px 28px 20px; text-align: center; border-bottom: 1px solid #e2e8f0;">
-                    <div style="font-size: 24px; font-weight: 700; line-height: 1.2; color: #0f172a;">
-                      <span style="display: inline-block; margin-left: 2px; padding: 2px 7px; border-radius: 5px; background-color: #0f172a; color: #d4ff4d;">Nest Arrival</span>
+                  <td style="padding:28px 28px 20px;text-align:center;border-bottom:1px solid #e2e8f0;">
+                    <div style="font-size:24px;font-weight:700;line-height:1.2;color:#0f172a;">
+                      <span style="display:inline-block;padding:2px 7px;border-radius:5px;background:#0f172a;color:#d4ff4d;">Nest Arrival</span>
                     </div>
-                    <div style="margin-top: 8px; font-size: 12px; line-height: 1.5; color: #64748b;">
-                      Verification-first newcomer housing
-                    </div>
+                    <div style="margin-top:8px;font-size:12px;line-height:1.5;color:#64748b;">Verification-first newcomer housing</div>
                   </td>
                 </tr>
                 <tr>
-                  <td style="padding: 28px;">
-                    <p style="margin: 0 0 14px; font-size: 15px; line-height: 1.6; color: #334155;">
-                      Hello,
-                    </p>
-                    <p style="margin: 0 0 24px; font-size: 15px; line-height: 1.6; color: #334155;">
-                      Use the verification code below to finish activating your NestArrival account.
-                    </p>
-                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin: 0 0 24px;">
+                  <td style="padding:28px;">
+                    <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#334155;">Hello,</p>
+                    <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#334155;">Use the verification code below to finish activating your NestArrival account.</p>
+                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;">
                       <tr>
-                        <td align="center" style="padding: 20px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;">
-                          <div style="font-size: 13px; line-height: 1.4; color: #64748b; margin-bottom: 8px;">
-                            Verification code
-                          </div>
-                          <div style="font-size: 32px; line-height: 1.2; font-weight: 700; letter-spacing: 8px; color: #020617;">
-                            ${otp}
-                          </div>
+                        <td align="center" style="padding:20px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;">
+                          <div style="font-size:13px;line-height:1.4;color:#64748b;margin-bottom:8px;">Verification code</div>
+                          <div style="font-size:32px;line-height:1.2;font-weight:700;letter-spacing:8px;color:#020617;">${otp}</div>
                         </td>
                       </tr>
                     </table>
-                    <p style="margin: 0 0 14px; font-size: 14px; line-height: 1.6; color: #475569;">
-                      This code expires in ${OTP_TTL_MINUTES} minutes. For your security, do not share it with anyone.
-                    </p>
-                    <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #64748b;">
-                      If you did not request this email, you can safely ignore it.
-                    </p>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 18px 28px; background-color: #f8fafc; border-top: 1px solid #e2e8f0; text-align: center;">
-                    <p style="margin: 0; font-size: 12px; line-height: 1.5; color: #64748b;">
-                      NestArrival helps newcomers find verified housing with confidence.
-                    </p>
+                    <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#475569;">This code expires in ${OTP_TTL_MINUTES} minutes. For your security, do not share it with anyone.</p>
+                    <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request this email, you can safely ignore it.</p>
                   </td>
                 </tr>
               </table>
@@ -151,77 +168,37 @@ function buildOtpEmail(otp) {
   };
 }
 
-exports.sendVerificationOtp = async (email, otp) => {
-  return sendOtpEmail({
-    email,
-    otp,
-    content: buildOtpEmail(otp),
-    successLabel: {
-      console: "[NestArrival OTP Development Fallback]",
-      sent: "Verification email",
-    },
-  });
-};
-
 function buildResetOtpEmail(otp) {
   const html = `
     <!doctype html>
     <html lang="en">
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="color-scheme" content="light">
-        <meta name="supported-color-schemes" content="light">
-        <title>NestArrival password reset</title>
-      </head>
-      <body style="margin: 0; padding: 0; background-color: #f6f8fb; font-family: Arial, Helvetica, sans-serif; color: #0f172a;">
-        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f6f8fb; margin: 0; padding: 32px 12px;">
+      <body style="margin:0;padding:0;background:#f6f8fb;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f8fb;padding:32px 12px;">
           <tr>
             <td align="center">
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
                 <tr>
-                  <td style="padding: 28px 28px 20px; text-align: center; border-bottom: 1px solid #e2e8f0;">
-                    <div style="font-size: 24px; font-weight: 700; line-height: 1.2; color: #0f172a;">
-                      <span style="display: inline-block; margin-left: 2px; padding: 2px 7px; border-radius: 5px; background-color: #0f172a; color: #d4ff4d;">Nest Arrival</span>
+                  <td style="padding:28px 28px 20px;text-align:center;border-bottom:1px solid #e2e8f0;">
+                    <div style="font-size:24px;font-weight:700;line-height:1.2;color:#0f172a;">
+                      <span style="display:inline-block;padding:2px 7px;border-radius:5px;background:#0f172a;color:#d4ff4d;">Nest Arrival</span>
                     </div>
-                    <div style="margin-top: 8px; font-size: 12px; line-height: 1.5; color: #64748b;">
-                      Verification-first newcomer housing
-                    </div>
+                    <div style="margin-top:8px;font-size:12px;line-height:1.5;color:#64748b;">Verification-first newcomer housing</div>
                   </td>
                 </tr>
                 <tr>
-                  <td style="padding: 28px;">
-                    <p style="margin: 0 0 14px; font-size: 15px; line-height: 1.6; color: #334155;">
-                      Hello,
-                    </p>
-                    <p style="margin: 0 0 24px; font-size: 15px; line-height: 1.6; color: #334155;">
-                      Use the password reset code below to reset your NestArrival password.
-                    </p>
-                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin: 0 0 24px;">
+                  <td style="padding:28px;">
+                    <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#334155;">Hello,</p>
+                    <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#334155;">Use the password reset code below to reset your NestArrival password.</p>
+                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;">
                       <tr>
-                        <td align="center" style="padding: 20px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;">
-                          <div style="font-size: 13px; line-height: 1.4; color: #64748b; margin-bottom: 8px;">
-                            Password Reset Code
-                          </div>
-                          <div style="font-size: 32px; line-height: 1.2; font-weight: 700; letter-spacing: 8px; color: #020617;">
-                            ${otp}
-                          </div>
+                        <td align="center" style="padding:20px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;">
+                          <div style="font-size:13px;line-height:1.4;color:#64748b;margin-bottom:8px;">Password Reset Code</div>
+                          <div style="font-size:32px;line-height:1.2;font-weight:700;letter-spacing:8px;color:#020617;">${otp}</div>
                         </td>
                       </tr>
                     </table>
-                    <p style="margin: 0 0 14px; font-size: 14px; line-height: 1.6; color: #475569;">
-                      This code expires in ${OTP_TTL_MINUTES} minutes. For your security, do not share it with anyone.
-                    </p>
-                    <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #64748b;">
-                      If you did not request a password reset, you can safely ignore this email.
-                    </p>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 18px 28px; background-color: #f8fafc; border-top: 1px solid #e2e8f0; text-align: center;">
-                    <p style="margin: 0; font-size: 12px; line-height: 1.5; color: #64748b;">
-                      NestArrival helps newcomers find verified housing with confidence.
-                    </p>
+                    <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#475569;">This code expires in ${OTP_TTL_MINUTES} minutes. For your security, do not share it with anyone.</p>
+                    <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">If you did not request a password reset, you can safely ignore this email.</p>
                   </td>
                 </tr>
               </table>
@@ -239,8 +216,71 @@ function buildResetOtpEmail(otp) {
   };
 }
 
-exports.sendPasswordResetOtp = async (email, otp) => {
-  return sendOtpEmail({
+function buildPartnerDecisionEmail({ organizationName, fullName, status }) {
+  const accepted = status === "ACCEPTED";
+  return {
+    subject: accepted
+      ? "Your NestArrival partnership inquiry has been accepted"
+      : "Update on your NestArrival partnership inquiry",
+    html: `
+      <!doctype html>
+      <html lang="en">
+        <body style="margin:0;padding:0;background:#f6f8fb;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f8fb;padding:32px 12px;">
+            <tr>
+              <td align="center">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+                  <tr>
+                    <td style="padding:28px 28px 20px;text-align:center;border-bottom:1px solid #e2e8f0;">
+                      <div style="font-size:24px;font-weight:700;line-height:1.2;color:#0f172a;">
+                        <span style="display:inline-block;padding:2px 7px;border-radius:5px;background:#0f172a;color:#d4ff4d;">Nest Arrival</span>
+                      </div>
+                      <div style="margin-top:8px;font-size:12px;line-height:1.5;color:#64748b;">Partnership team update</div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:28px;">
+                      <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#334155;">Hello ${fullName || ""},</p>
+                      <p style="margin:0 0 16px;font-size:18px;font-weight:700;color:#111827;">${accepted ? "We’re excited to move forward" : "Thank you for your interest"}</p>
+                      <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#334155;">${
+                        accepted
+                          ? "Our partnerships team reviewed your submission and would like to move ahead with the next steps. We will be in touch shortly to coordinate a formal discussion."
+                          : "Our partnerships team reviewed your submission and, at this time, we will not be moving forward."
+                      }</p>
+                      <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#475569;">Organization: <strong>${organizationName || "N/A"}</strong></p>
+                      <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">Let us know in case of any further questions.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `,
+    text: `Hello ${fullName || ""}\n\n${
+      accepted ? "We’re excited to move forward" : "Thank you for your interest"
+    }\n\n${
+      accepted
+        ? "Our partnerships team reviewed your submission and would like to move ahead with the next steps."
+        : "Our partnerships team reviewed your submission and, at this time, we will not be moving forward."
+    }\n\nOrganization: ${organizationName || "N/A"}\n`,
+  };
+}
+
+exports.sendVerificationOtp = async (email, otp) =>
+  sendMail({
+    email,
+    otp,
+    content: buildOtpEmail(otp),
+    successLabel: {
+      console: "[NestArrival OTP Development Fallback]",
+      sent: "Verification email",
+    },
+  });
+
+exports.sendPasswordResetOtp = async (email, otp) =>
+  sendMail({
     email,
     otp,
     content: buildResetOtpEmail(otp),
@@ -249,4 +289,13 @@ exports.sendPasswordResetOtp = async (email, otp) => {
       sent: "Password reset email",
     },
   });
-};
+
+exports.sendPartnerDecisionEmail = async (email, payload) =>
+  sendMail({
+    email,
+    content: buildPartnerDecisionEmail(payload),
+    successLabel: {
+      console: "[NestArrival Partner Decision Development Fallback]",
+      sent: `Partner ${payload.status.toLowerCase()} email`,
+    },
+  });
