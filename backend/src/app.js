@@ -44,6 +44,18 @@ const envOrigins = (process.env.CORS_ORIGINS || "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 const allowedOrigins = Array.from(new Set([...DEFAULT_ORIGINS, ...envOrigins]));
+const corsOptions = {
+  origin(origin, callback) {
+    // Allow non-browser clients such as Postman/curl, plus known frontend origins.
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true,
+  optionsSuccessStatus: 204,
+};
 
 // Ensure uploads directory exists before serving it
 const uploadDir = path.join(__dirname, "..", "uploads");
@@ -75,7 +87,8 @@ app.use(
     },
   }),
 );
-app.use(cors());
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(express.json({ limit: "10kb" })); // limit request body size
 app.use(cookieParser()); // parse Cookie header into req.cookies
 app.use(express.urlencoded({ extended: true, limit: "10kb" })); // parse URL-encoded bodies
