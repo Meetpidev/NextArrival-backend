@@ -1,17 +1,17 @@
 const nodemailer = require("nodemailer");
 const { Resend } = require("resend");
+const { env } = require("../config/env");
 
-const DEFAULT_FROM = "NestArrival <no-reply@nestarrival.ca>";
 const OTP_TTL_MINUTES = 15;
 
 function getMailConfig() {
-  const from = process.env.MAIL_FROM || process.env.RESEND_FROM || DEFAULT_FROM;
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpPort = Number(process.env.SMTP_PORT || 587);
-  const smtpSecure = process.env.SMTP_SECURE === "true";
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASS;
-  const resendApiKey = process.env.RESEND_API_KEY;
+  const from = env.mail.from;
+  const smtpHost = env.mail.smtpHost;
+  const smtpPort = env.mail.smtpPort;
+  const smtpSecure = env.mail.smtpSecure;
+  const smtpUser = env.mail.smtpUser;
+  const smtpPass = env.mail.smtpPass;
+  const resendApiKey = env.mail.resendApiKey;
 
   if (smtpHost && smtpUser && smtpPass) {
     return {
@@ -65,7 +65,7 @@ async function sendMail({ email, content, successLabel, otp = null }) {
   const config = getMailConfig();
 
   if (!config.configured) {
-    if (process.env.ALLOW_CONSOLE_OTP === "true") {
+    if (env.mail.allowConsoleOtp) {
       if (otp) {
         logConsoleOtp({
           label: successLabel.console,
@@ -299,3 +299,4 @@ exports.sendPartnerDecisionEmail = async (email, payload) =>
       sent: `Partner ${payload.status.toLowerCase()} email`,
     },
   });
+

@@ -3,8 +3,9 @@ const { Pool } = require("pg");
 const { PrismaPg } = require("@prisma/adapter-pg");
 const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcryptjs");
+const { env } = require("./src/config/env");
 
-const connectionString = process.env.DATABASE_URL;
+const connectionString = env.databaseUrl;
 if (!connectionString) {
   console.error("DATABASE_URL is not defined in backend .env");
   process.exit(1);
@@ -201,3 +202,4 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+

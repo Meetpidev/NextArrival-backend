@@ -9,6 +9,7 @@
 
 const jwt = require("jsonwebtoken");
 const { prisma } = require("../config/db");
+const { env } = require("../config/env");
 
 const requireAuth = async (req, res, next) => {
   // Cookie name is consistent across REST + Socket.IO auth.
@@ -23,7 +24,7 @@ const requireAuth = async (req, res, next) => {
 
   try {
     // Decode/verify JWT payload.
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const payload = jwt.verify(token, env.jwtSecret);
 
     // Fetch user record and pre-load a couple of frequently used relations
     // so controllers can rely on `req.user` having relevant info.
@@ -62,3 +63,4 @@ const requireAuth = async (req, res, next) => {
 };
 
 module.exports = { requireAuth };
+

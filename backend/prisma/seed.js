@@ -3,8 +3,9 @@ const { Pool } = require("pg");
 const { PrismaPg } = require("@prisma/adapter-pg");
 const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcryptjs");
+const { env } = require("../src/config/env");
 
-const connectionString = process.env.DATABASE_URL || "";
+const connectionString = env.databaseUrl || "";
 
 let resolvedDbUrl = connectionString;
 if (connectionString.startsWith("prisma+postgres://")) {
@@ -172,3 +173,4 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+

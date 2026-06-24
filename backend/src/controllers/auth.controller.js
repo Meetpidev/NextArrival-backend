@@ -13,6 +13,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { OAuth2Client } = require("google-auth-library");
+const { env } = require("../config/env");
 const { sendVerificationOtp, sendPasswordResetOtp } = require("../services/mail.service");
 const { createOtp, hashOtp } = require("../utils/otp");
 const {
@@ -30,14 +31,14 @@ const {
   sendServerError,
 } = require("../utils/http");
 
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const googleClient = new OAuth2Client(env.googleClientId);
 const JWT_COOKIE_NAME = "nestarrival_session";
 const ALLOWED_SELF_ROLES = ["TENANT", "OWNER"];
 
 function createToken(user) {
   return jwt.sign(
     { userId: user.id, email: user.email },
-    process.env.JWT_SECRET,
+    env.jwtSecret,
     { expiresIn: "7d" },
   );
 }
@@ -72,8 +73,8 @@ function serializeAuthUser(user) {
 function setCookie(res, token) {
   res.cookie(JWT_COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+    secure: env.isProduction,
+    sameSite: env.isProduction ? "none" : "strict",
     maxAge: 7 * 24 * 60 * 60 * 1000,
     path: "/",
   });
@@ -254,7 +255,7 @@ exports.login = async (req, res) => {
 };
 exports.googleLogin = async (req, res) => {
   try {
-    if (!process.env.GOOGLE_CLIENT_ID) {
+    if (!env.googleClientId) {
       return res.status(503).json({ error: "Google login is not configured" });
     }
 
@@ -263,7 +264,7 @@ exports.googleLogin = async (req, res) => {
 
     const ticket = await googleClient.verifyIdToken({
       idToken: credential,
-      audience: process.env.GOOGLE_CLIENT_ID,
+      audience: env.googleClientId,
     });
     const payload = ticket.getPayload();
     if (!payload) {
@@ -745,3 +746,4 @@ exports.resetPassword = async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 };
+

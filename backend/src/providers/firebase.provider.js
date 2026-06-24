@@ -1,33 +1,15 @@
 const admin = require("firebase-admin");
+const { getFirebaseServiceAccount } = require("../config/env");
 
 let initialized = false;
 
 function parseServiceAccount() {
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    try {
-      return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-    } catch (err) {
-      console.error(
-        "[Firebase] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:",
-        err.message,
-      );
-      return null;
-    }
+  try {
+    return getFirebaseServiceAccount();
+  } catch (err) {
+    console.error("[Firebase] Invalid Firebase credential configuration:", err.message);
+    return null;
   }
-
-  if (
-    process.env.FIREBASE_PROJECT_ID &&
-    process.env.FIREBASE_CLIENT_EMAIL &&
-    process.env.FIREBASE_PRIVATE_KEY
-  ) {
-    return {
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-    };
-  }
-
-  return null;
 }
 
 function getFirebaseMessaging() {
@@ -112,3 +94,4 @@ async function sendPushNotification({ tokens, title, message, data = {} }) {
 }
 
 module.exports = { sendPushNotification };
+

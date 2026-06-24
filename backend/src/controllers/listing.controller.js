@@ -11,6 +11,7 @@
 
 const { prisma } = require("../config/db");
 const jwt = require("jsonwebtoken");
+const { env } = require("../config/env");
 const { sendServerError } = require("../utils/http");
 const JWT_COOKIE_NAME = "nestarrival_session";
 
@@ -43,7 +44,7 @@ exports.getListings = async (req, res) => {
 
       let payload;
       try {
-        payload = jwt.verify(token, process.env.JWT_SECRET);
+        payload = jwt.verify(token, env.jwtSecret);
       } catch (error) {
         return res
           .status(401)
@@ -136,7 +137,7 @@ exports.getListingById = async (req, res) => {
       }
 
       try {
-        const payload = jwt.verify(token, process.env.JWT_SECRET);
+        const payload = jwt.verify(token, env.jwtSecret);
         const user = await prisma.user.findUnique({
           where: { id: payload.userId },
         });
@@ -438,3 +439,4 @@ exports.toggleSaveListing = async (req, res) => {
     );
   }
 };
+

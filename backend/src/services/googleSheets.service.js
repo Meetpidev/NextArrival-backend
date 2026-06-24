@@ -1,20 +1,23 @@
 const { google } = require('googleapis');
-const path = require('path');
+const { env, getGoogleSheetsKeyJson } = require('../config/env');
 
 class GoogleSheetsService {
   constructor() {
     this.sheets = null;
-    this.SPREADSHEET_ID =
-      process.env.GOOGLE_SHEETS_SPREADSHEET_ID ||
-      '';
+    this.SPREADSHEET_ID = env.googleSheets.spreadsheetId;
     this.PARTNER_SHEET_NAME = null;
     this.initializePromise = this.initializeSheets();
   }
 
   async initializeSheets() {
     try {
-      const keyFile = process.env.GOOGLE_SHEETS_KEY_FILE || path.join(__dirname, '../../credentials.json');
-      const keyJson = this.parseKeyJson(process.env.GOOGLE_SHEETS_KEY_JSON);
+      if (!this.SPREADSHEET_ID) {
+        console.warn("[GoogleSheets] GOOGLE_SHEETS_SPREADSHEET_ID is not configured. Sheets integration disabled.");
+        return;
+      }
+
+      const keyFile = env.googleSheets.keyFile;
+      const keyJson = getGoogleSheetsKeyJson();
 
       const auth = keyJson
         ? new google.auth.GoogleAuth({ credentials: keyJson, scopes: ['https://www.googleapis.com/auth/spreadsheets'] })
@@ -31,7 +34,7 @@ class GoogleSheetsService {
       console.log(`Using partner sheet: "${this.PARTNER_SHEET_NAME}"`);
 
     } catch (error) {
-      console.error('Failed to initialize Google Sheets:', error);
+      console.error('[GoogleSheets] Failed to initialize Google Sheets:', error.message);
       this.sheets = null;
     }
   }
@@ -210,3 +213,4 @@ class GoogleSheetsService {
 }
 
 module.exports = new GoogleSheetsService();
+

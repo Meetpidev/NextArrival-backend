@@ -4,17 +4,26 @@ const {
   ReceiveMessageCommand,
   DeleteMessageCommand,
 } = require("@aws-sdk/client-sqs");
+const { env } = require("../config/env");
 
 let sqsClient;
 
 function getQueueUrl() {
-  return process.env.NOTIFICATION_QUEUE_URL || process.env.AWS_SQS_QUEUE_URL;
+  return env.aws.notificationQueueUrl;
 }
 
 function getSqsClient() {
   if (!sqsClient) {
+    const credentials = env.aws.accessKeyId && env.aws.secretAccessKey
+      ? {
+          accessKeyId: env.aws.accessKeyId,
+          secretAccessKey: env.aws.secretAccessKey,
+        }
+      : undefined;
+
     sqsClient = new SQSClient({
-      region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION,
+      region: env.aws.region,
+      ...(credentials ? { credentials } : {}),
     });
   }
   return sqsClient;

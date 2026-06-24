@@ -17,6 +17,7 @@ const cookieParser = require("cookie-parser");
 const path = require("path");
 const fs = require("fs");
 const helmet = require("helmet");
+const { env } = require("./config/env");
 const multer = require("multer");
 
 // Rate limiter instances shared across route namespaces
@@ -38,12 +39,7 @@ const inquiryRoutes = require("./routes/inquiry.routes");
 const interestRoutes = require("./routes/interest.routes");
 const notificationRoutes = require("./routes/notification.routes");
 
-const DEFAULT_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"];
-const envOrigins = (process.env.CORS_ORIGINS || "")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-const allowedOrigins = Array.from(new Set([...DEFAULT_ORIGINS, ...envOrigins]));
+const allowedOrigins = env.corsOrigins;
 const corsOptions = {
   origin(origin, callback) {
     // Allow non-browser clients such as Postman/curl, plus known frontend origins.
@@ -65,7 +61,7 @@ if (!fs.existsSync(uploadDir)) {
 
 const app = express();
 
-if (process.env.REQUEST_LOGGING === "true") {
+if (env.requestLogging) {
   app.use((req, res, next) => {
     console.log(
       `[Backend Request] ${req.method} ${req.path} - Received at ${new Date().toISOString()}`,
@@ -74,7 +70,7 @@ if (process.env.REQUEST_LOGGING === "true") {
   });
 }
 
-if (process.env.NODE_ENV === "production") {
+if (env.isProduction) {
   app.set("trust proxy", 1);
 }
 app.disable("x-powered-by");

@@ -9,6 +9,7 @@
 
 const { prisma } = require("../config/db");
 const jwt = require("jsonwebtoken");
+const { env } = require("../config/env");
 const { createNotification } = require("../services/notification.service");
 
 // Minimal cookie parser for Socket.IO handshake headers.
@@ -35,7 +36,7 @@ function initChatSocket(io) {
         return next(new Error("Unauthorized"));
       }
 
-      const payload = jwt.verify(token, process.env.JWT_SECRET);
+      const payload = jwt.verify(token, env.jwtSecret);
       const user = await prisma.user.findUnique({
         where: { id: payload.userId },
       });
@@ -116,3 +117,4 @@ function initChatSocket(io) {
 }
 
 module.exports = { initChatSocket };
+

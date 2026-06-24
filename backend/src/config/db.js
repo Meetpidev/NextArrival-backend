@@ -1,8 +1,9 @@
 const { Pool } = require("pg");
 const { PrismaPg } = require("@prisma/adapter-pg");
 const { PrismaClient } = require("@prisma/client");
+const { env } = require("./env");
 
-const connectionString = process.env.DATABASE_URL;
+const connectionString = env.databaseUrl;
 
 if (!connectionString) {
   console.error("DATABASE_URL is not defined in backend .env");
@@ -40,3 +41,4 @@ process.on("SIGINT", async () => {
 });
 
 module.exports = { prisma };
+
