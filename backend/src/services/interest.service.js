@@ -5,6 +5,8 @@ const {
   enqueueNotificationJob,
 } = require("./notification.service");
 
+const DAILY_TENANT_INQUIRY_LIMIT = 10;
+
 class InterestServiceError extends Error {
   constructor(code, message, statusCode = 400) {
     super(message);
@@ -146,6 +148,21 @@ async function createInterestRequest({ tenant, propertyId, message }) {
     );
   }
 
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  const requestsToday = await repo.countTenantRequestsSince(prisma, {
+    tenantId: tenant.id,
+    since: dayStart,
+  });
+
+  if (requestsToday >= DAILY_TENANT_INQUIRY_LIMIT) {
+    throw new InterestServiceError(
+      "DAILY_INQUIRY_LIMIT_REACHED",
+      "Daily inquiry limit reached. Please try again tomorrow.",
+      429,
+    );
+  }
+
   const profileSnapshot = buildProfileSnapshot(tenant);
   const propertySnapshot = buildPropertySnapshot(property);
   const trimmedMessage = message.trim();
@@ -175,14 +192,25 @@ async function createInterestRequest({ tenant, propertyId, message }) {
         propertySnapshot,
       });
 
+      await repo.createInquiryAuditLog(tx, {
+        inquiryId: interestRequest.id,
+        actorId: tenant.id,
+        actorRole: tenant.role,
+        action: "CREATED",
+        metadata: {
+          propertyId: property.id,
+          ownerId: property.ownerId,
+        },
+      });
+
       const notification = await createNotification(
         {
           userId: property.ownerId,
           title: "New tenant inquiry",
           message: `${profileSnapshot.tenantName || "A verified tenant"} sent an inquiry for ${propertySnapshot.title}.`,
-          type: "INTEREST_REQUEST",
+          type: "INQUIRY_CREATED",
           relatedId: interestRequest.id,
-          relatedType: "InterestRequest",
+          relatedType: "Inquiry",
         },
         { prisma: tx, enqueue: false },
       );
@@ -265,7 +293,74 @@ async function getInterestRequest({ user, interestRequestId }) {
     );
   }
 
+  if (
+    (interestRequest.tenantId === user.id && interestRequest.tenantDeletedAt) ||
+    (interestRequest.ownerId === user.id && interestRequest.ownerDeletedAt)
+  ) {
+    throw new InterestServiceError(
+      "INTEREST_REQUEST_NOT_FOUND",
+      "Interest request not found",
+      404,
+    );
+  }
+
   return interestRequest;
+}
+
+async function deleteInterestRequestHistory({ user, interestRequestId }) {
+  const interestRequest = await repo.findInterestRequestById(prisma, interestRequestId);
+  if (!interestRequest) {
+    throw new InterestServiceError(
+      "INTEREST_REQUEST_NOT_FOUND",
+      "Interest request not found",
+      404,
+    );
+  }
+
+  if (interestRequest.tenantId !== user.id && interestRequest.ownerId !== user.id) {
+    throw new InterestServiceError(
+      "FORBIDDEN",
+      "You cannot delete this inquiry",
+      403,
+    );
+  }
+
+  const participantRole = interestRequest.tenantId === user.id ? "TENANT" : "OWNER";
+  const result = await prisma.$transaction(async (tx) => {
+    const updateResult = await repo.markDeletedForParticipant(tx, {
+      id: interestRequestId,
+      userId: user.id,
+      role: participantRole,
+    });
+
+    if (updateResult.count === 0) {
+      throw new InterestServiceError(
+        "INTEREST_REQUEST_NOT_FOUND",
+        "Interest request not found",
+        404,
+      );
+    }
+
+    await repo.createInquiryAuditLog(tx, {
+      inquiryId: interestRequestId,
+      actorId: user.id,
+      actorRole: user.role,
+      action: "DELETED_FROM_HISTORY",
+      metadata: { deletedFor: participantRole },
+    });
+
+    return updateResult;
+  });
+
+  if (result.count === 0) {
+    throw new InterestServiceError(
+      "INTEREST_REQUEST_NOT_FOUND",
+      "Interest request not found",
+      404,
+    );
+  }
+
+  return { deleted: true };
 }
 
 function buildDecisionMessage(status, interestRequest, ownerMessage) {
@@ -313,6 +408,14 @@ async function decideInterestRequest({ owner, interestRequestId, status, ownerMe
       "NOT_PROPERTY_OWNER",
       "Only the property owner can manage this inquiry",
       403,
+    );
+  }
+
+  if (existing.ownerDeletedAt) {
+    throw new InterestServiceError(
+      "INTEREST_REQUEST_NOT_FOUND",
+      "Interest request not found",
+      404,
     );
   }
 
@@ -379,10 +482,22 @@ async function decideInterestRequest({ owner, interestRequestId, status, ownerMe
           message: buildDecisionMessage(status, interestRequest, trimmedOwnerMessage),
           type: notificationType,
           relatedId: interestRequest.id,
-          relatedType: "InterestRequest",
+          relatedType: "Inquiry",
         },
         { prisma: tx, enqueue: false },
       );
+
+      await repo.createInquiryAuditLog(tx, {
+        inquiryId: interestRequest.id,
+        actorId: owner.id,
+        actorRole: owner.role,
+        action: status === "ACCEPTED" ? "ACCEPTED" : "DECLINED",
+        metadata: {
+          ownerMessage: trimmedOwnerMessage || null,
+          previousStatus: "PENDING",
+          status,
+        },
+      });
 
       return { interestRequest, chatRoom, chatMessages, notification };
     });
@@ -453,6 +568,7 @@ module.exports = {
   createInterestRequest,
   getPendingInterestRequests,
   getInterestRequest,
+  deleteInterestRequestHistory,
   acceptInterestRequest,
   rejectInterestRequest,
   respondToInterestRequest,

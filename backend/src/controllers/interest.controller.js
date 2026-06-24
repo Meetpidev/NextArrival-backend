@@ -10,6 +10,7 @@ const {
   createInterestRequest,
   getPendingInterestRequests,
   getInterestRequest,
+  deleteInterestRequestHistory,
   acceptInterestRequest,
   rejectInterestRequest,
   respondToInterestRequest,
@@ -101,6 +102,24 @@ exports.getById = async (req, res) => {
   }
 };
 
+
+exports.deleteHistory = async (req, res) => {
+  try {
+    const { id } = interestRequestIdParamSchema.parse(req.params);
+    const result = await deleteInterestRequestHistory({
+      user: req.user,
+      interestRequestId: id,
+    });
+
+    return res.json({
+      success: true,
+      message: "Inquiry removed from your history",
+      data: result,
+    });
+  } catch (err) {
+    return sendInterestError(res, err);
+  }
+};
 exports.accept = async (req, res) => {
   try {
     const { id } = interestRequestIdParamSchema.parse(req.params);
@@ -163,3 +182,4 @@ exports.respond = async (req, res) => {
 };
 
 module.exports.sendInterestError = sendInterestError;
+

@@ -1,0 +1,3 @@
+ALTER TABLE IF EXISTS "interest_requests"
+ADD COLUMN IF NOT EXISTS "tenantDeletedAt" TIMESTAMP(3),
+ADD COLUMN IF NOT EXISTS "ownerDeletedAt" TIMESTAMP(3);

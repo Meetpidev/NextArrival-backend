@@ -41,18 +41,18 @@ function findPropertyById(prisma, propertyId) {
 }
 
 function findPendingByTenantAndProperty(prisma, tenantId, propertyId) {
-  return prisma.interestRequest.findFirst({
+  return prisma.inquiry.findFirst({
     where: { tenantId, propertyId, status: "PENDING" },
   });
 }
 
 function findPendingByOwner(prisma, { ownerId, page, limit }) {
-  const where = { ownerId, status: "PENDING" };
+  const where = { ownerId, status: "PENDING", ownerDeletedAt: null };
   const skip = (page - 1) * limit;
 
   return Promise.all([
-    prisma.interestRequest.count({ where }),
-    prisma.interestRequest.findMany({
+    prisma.inquiry.count({ where }),
+    prisma.inquiry.findMany({
       where,
       include: INTEREST_INCLUDE,
       orderBy: { createdAt: "desc" },
@@ -63,12 +63,44 @@ function findPendingByOwner(prisma, { ownerId, page, limit }) {
 }
 
 function findInterestRequestById(prisma, id) {
-  return prisma.interestRequest.findUnique({
+  return prisma.inquiry.findUnique({
     where: { id },
     include: INTEREST_INCLUDE,
   });
 }
 
+function countTenantRequestsSince(prisma, { tenantId, since }) {
+  return prisma.inquiry.count({
+    where: {
+      tenantId,
+      createdAt: { gte: since },
+    },
+  });
+}
+
+function markDeletedForParticipant(prisma, { id, userId, role }) {
+  const isTenant = role === "TENANT";
+  return prisma.inquiry.updateMany({
+    where: {
+      id,
+      ...(isTenant ? { tenantId: userId } : { ownerId: userId }),
+    },
+    data: isTenant
+      ? { tenantDeletedAt: new Date() }
+      : { ownerDeletedAt: new Date() },
+  });
+}
+function createInquiryAuditLog(prisma, data) {
+  return prisma.inquiryAuditLog.create({
+    data: {
+      inquiryId: data.inquiryId,
+      actorId: data.actorId || null,
+      actorRole: data.actorRole || null,
+      action: data.action,
+      metadata: data.metadata || undefined,
+    },
+  });
+}
 function findActiveSubscription(prisma, userId) {
   return prisma.subscription.findFirst({
     where: {
@@ -88,7 +120,7 @@ function findActiveSubscription(prisma, userId) {
 }
 
 function createInterestRequest(prisma, data) {
-  return prisma.interestRequest.create({
+  return prisma.inquiry.create({
     data,
     include: INTEREST_INCLUDE,
   });
@@ -120,7 +152,7 @@ function createInterestChatMessage(prisma, data) {
 }
 
 function updateInterestStatus(prisma, { id, status, ownerMessage, expectedStatus = "PENDING" }) {
-  return prisma.interestRequest.update({
+  return prisma.inquiry.update({
     where: { id, status: expectedStatus },
     data: {
       status,
@@ -151,6 +183,9 @@ module.exports = {
   findPendingByTenantAndProperty,
   findPendingByOwner,
   findInterestRequestById,
+  countTenantRequestsSince,
+  markDeletedForParticipant,
+  createInquiryAuditLog,
   findActiveSubscription,
   createInterestRequest,
   findOrCreateChatRoom,
