@@ -430,10 +430,20 @@ function rejectInterestRequest({ owner, interestRequestId, ownerMessage }) {
 }
 
 function respondToInterestRequest({ owner, interestRequestId, action, ownerMessage }) {
+  const statusByAction = {
+    ACCEPT: "ACCEPTED",
+    DECLINE: "REJECTED",
+  };
+  const status = statusByAction[action];
+
+  if (!status) {
+    throw new InterestServiceError("INVALID_ACTION", "Unsupported action", 400);
+  }
+
   return decideInterestRequest({
     owner,
     interestRequestId,
-    status: action === "ACCEPT" ? "ACCEPTED" : "REJECTED",
+    status,
     ownerMessage,
   });
 }
@@ -447,3 +457,4 @@ module.exports = {
   rejectInterestRequest,
   respondToInterestRequest,
 };
+

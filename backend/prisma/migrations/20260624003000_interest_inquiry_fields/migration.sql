@@ -1,3 +1,6 @@
+-- Existing interest_requests rows predate tenantMessage storage. They are backfilled
+-- with an empty string so the new required column can be added without inventing
+-- historical tenant text that was not stored on the InterestRequest record.
 ALTER TABLE IF EXISTS "interest_requests"
 ADD COLUMN IF NOT EXISTS "tenantMessage" TEXT NOT NULL DEFAULT '',
 ADD COLUMN IF NOT EXISTS "ownerMessage" TEXT,
