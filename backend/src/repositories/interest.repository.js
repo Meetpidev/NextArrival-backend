@@ -3,7 +3,6 @@ const INTEREST_INCLUDE = {
     select: {
       id: true,
       fullName: true,
-      email: true,
       verificationStatus: true,
       currentCountry: true,
       destinationCountry: true,
@@ -17,7 +16,7 @@ const INTEREST_INCLUDE = {
       isUrgentMatch: true,
     },
   },
-  owner: { select: { id: true, fullName: true, email: true } },
+  owner: { select: { id: true, fullName: true } },
   property: {
     select: {
       id: true,
@@ -40,9 +39,9 @@ function findPropertyById(prisma, propertyId) {
   });
 }
 
-function findPendingByTenantAndProperty(prisma, tenantId, propertyId) {
+function findByTenantAndProperty(prisma, tenantId, propertyId) {
   return prisma.inquiry.findFirst({
-    where: { tenantId, propertyId, status: "PENDING" },
+    where: { tenantId, propertyId },
   });
 }
 
@@ -180,7 +179,7 @@ function incrementApproachUsage(prisma, subscriptionId, approachesAllowed) {
 
 module.exports = {
   findPropertyById,
-  findPendingByTenantAndProperty,
+  findByTenantAndProperty,
   findPendingByOwner,
   findInterestRequestById,
   countTenantRequestsSince,

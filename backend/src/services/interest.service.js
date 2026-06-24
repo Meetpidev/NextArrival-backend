@@ -16,6 +16,12 @@ class InterestServiceError extends Error {
   }
 }
 
+function sanitizePlainText(value) {
+  return String(value || "")
+    .replace(/[<>"'&]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 function buildProfileSnapshot(tenant) {
   return {
     tenantId: tenant.id,
@@ -135,15 +141,15 @@ async function createInterestRequest({ tenant, propertyId, message }) {
     );
   }
 
-  const existingPending = await repo.findPendingByTenantAndProperty(
+  const existingInquiry = await repo.findByTenantAndProperty(
     prisma,
     tenant.id,
     propertyId,
   );
-  if (existingPending) {
+  if (existingInquiry) {
     throw new InterestServiceError(
-      "PENDING_INTEREST_EXISTS",
-      "A pending interest request already exists for this property",
+      "INQUIRY_EXISTS",
+      "An inquiry already exists for this property",
       409,
     );
   }
@@ -165,7 +171,14 @@ async function createInterestRequest({ tenant, propertyId, message }) {
 
   const profileSnapshot = buildProfileSnapshot(tenant);
   const propertySnapshot = buildPropertySnapshot(property);
-  const trimmedMessage = message.trim();
+  const trimmedMessage = sanitizePlainText(message);
+  if (!trimmedMessage) {
+    throw new InterestServiceError(
+      "MESSAGE_REQUIRED",
+      "Message is required",
+      400,
+    );
+  }
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -236,11 +249,11 @@ async function createInterestRequest({ tenant, propertyId, message }) {
 
     if (
       error.code === "P2002" ||
-      String(error.message || "").includes("interest_requests_pending_unique_idx")
+      String(error.message || "").includes("inquiries_tenant_property_unique_idx")
     ) {
       throw new InterestServiceError(
-        "PENDING_INTEREST_EXISTS",
-        "A pending interest request already exists for this property",
+        "INQUIRY_EXISTS",
+        "An inquiry already exists for this property",
         409,
       );
     }
@@ -419,7 +432,7 @@ async function decideInterestRequest({ owner, interestRequestId, status, ownerMe
     );
   }
 
-  const trimmedOwnerMessage = typeof ownerMessage === "string" ? ownerMessage.trim() : "";
+  const trimmedOwnerMessage = typeof ownerMessage === "string" ? sanitizePlainText(ownerMessage) : "";
   let result;
 
   try {
