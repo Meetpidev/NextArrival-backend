@@ -95,7 +95,9 @@ async function sendMail({ email, content, successLabel, otp = null }) {
       text: content.text,
       html: content.html,
     });
-    console.log(`[NestArrival SMTP] ${successLabel.sent} sent to ${maskEmail(email)}`);
+    console.log(
+      `[NestArrival SMTP] ${successLabel.sent} sent to ${maskEmail(email)}`,
+    );
     return true;
   }
 
@@ -245,9 +247,8 @@ function buildPartnerDecisionEmail({ organizationName, fullName, status }) {
                       <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#334155;">${
                         accepted
                           ? "Our partnerships team reviewed your submission and would like to move ahead with the next steps. We will be in touch shortly to coordinate a formal discussion."
-                          : "Our partnerships team reviewed your submission and, at this time, we will not be moving forward.<br>we will not be moving forward with your partnership request. <br> Thank you for sharing"
-                      }</p>
-                      <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#475569;">Organization: <strong>${organizationName || "N/A"}</strong></p>
+                          : "Our partnerships team reviewed your submission and, at this time, we will not be moving forward with your partnership request. Thank you for your interest."
+                      }</p>                      <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#475569;">Organization: <strong>${organizationName || "N/A"}</strong></p>
                       <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">Let us know in case of any further questions.</p>
                     </td>
                   </tr>
@@ -299,4 +300,3 @@ exports.sendPartnerDecisionEmail = async (email, payload) =>
       sent: `Partner ${payload.status.toLowerCase()} email`,
     },
   });
-

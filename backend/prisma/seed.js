@@ -5,7 +5,11 @@ const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcryptjs");
 const { env } = require("../src/config/env");
 
-const connectionString = env.databaseUrl || "";
+const connectionString = env.databaseUrl;
+if (!connectionString) {
+  console.error("DATABASE_URL is not defined in backend .env");
+  process.exit(1);
+}
 
 let resolvedDbUrl = connectionString;
 if (connectionString.startsWith("prisma+postgres://")) {
@@ -23,7 +27,6 @@ if (connectionString.startsWith("prisma+postgres://")) {
     console.error("Failed to parse proxy URL:", e);
   }
 }
-
 const pool = new Pool({ connectionString: resolvedDbUrl });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
@@ -34,13 +37,13 @@ async function main() {
   // 1. Seed Admin
   const adminEmail = "admin@nestarrival.ca";
   const existingAdmin = await prisma.user.findUnique({
-    where: { email: adminEmail }
+    where: { email: adminEmail },
   });
 
   if (!existingAdmin) {
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash("NestArrivalAdmin2026!", salt);
-    
+
     await prisma.user.create({
       data: {
         email: adminEmail,
@@ -48,8 +51,8 @@ async function main() {
         role: "ADMIN",
         fullName: "NestArrival Administrator",
         isVerified: true,
-        verificationStatus: "VERIFIED"
-      }
+        verificationStatus: "VERIFIED",
+      },
     });
     console.log("Default Admin Account created successfully.");
   } else {
@@ -85,7 +88,7 @@ Verification is carried out by NestArrival's internal team. All team members are
 Your passport and visa documents are used only for identity verification. They are encrypted, stored securely, and deleted after verification is complete. No documents are shared with third parties.
 
 ## 5. Cancellation
-How to cancel: You can cancel your subscription at any time from your account settings. Cancellation takes effect at the end of your current billing period. You will not be charged again after cancellation.`
+How to cancel: You can cancel your subscription at any time from your account settings. Cancellation takes effect at the end of your current billing period. You will not be charged again after cancellation.`,
     },
     {
       id: "privacy",
@@ -93,7 +96,7 @@ How to cancel: You can cancel your subscription at any time from your account se
       content: `# Privacy Policy
 Last updated: June 1, 2026
 
-Your privacy is important to us. Your passport and visa documents are used only for identity verification. They are encrypted, stored securely, and deleted after verification is complete. No documents are shared with third parties.`
+Your privacy is important to us. Your passport and visa documents are used only for identity verification. They are encrypted, stored securely, and deleted after verification is complete. No documents are shared with third parties.`,
     },
     {
       id: "refund",
@@ -105,7 +108,7 @@ A refund is available if none of the verified owners you contacted reply to your
 
 A valid response means the verified owner replies to your message through the NestArrival chat within your active plan period. An automated reply or an out-of-office message does not count as a response.
 
-All refund claims are moderated and processed within 3 business days.`
+All refund claims are moderated and processed within 3 business days.`,
     },
     {
       id: "verification",
@@ -115,7 +118,7 @@ Last updated: June 1, 2026
 
 Verification is carried out by NestArrival's internal team. All team members are trained in document handling and privacy compliance. Verification typically takes 1–3 business days.
 
-Your passport and visa documents are used only for identity verification. They are encrypted, stored securely, and deleted after verification is complete. No documents are shared with third parties.`
+Your passport and visa documents are used only for identity verification. They are encrypted, stored securely, and deleted after verification is complete. No documents are shared with third parties.`,
     },
     {
       id: "cookie",
@@ -123,7 +126,7 @@ Your passport and visa documents are used only for identity verification. They a
       content: `# Cookie Policy
 Last updated: June 1, 2026
 
-We use basic and essential session cookies to manage user logins and preserve safety status. No marketing or tracking cookies are enabled for third-party platforms.`
+We use basic and essential session cookies to manage user logins and preserve safety status. No marketing or tracking cookies are enabled for third-party platforms.`,
     },
     {
       id: "community",
@@ -131,17 +134,17 @@ We use basic and essential session cookies to manage user logins and preserve sa
       content: `# Community Guidelines
 Last updated: June 1, 2026
 
-We promote safety and respect. Discrimination, fraudulent documentation uploads, and misleading rental fees are strictly prohibited and will result in immediate bans without eligibility for refunds.`
+We promote safety and respect. Discrimination, fraudulent documentation uploads, and misleading rental fees are strictly prohibited and will result in immediate bans without eligibility for refunds.`,
     },
     {
       id: "tenant-declaration",
       title: "Tenant Declaration",
-      content: `I hereby declare that all information, relocation details, visa documents, and letters of admission/employment provided are true and accurate. I understand that submitting fake documents will lead to legal action and a permanent platform ban.`
+      content: `I hereby declare that all information, relocation details, visa documents, and letters of admission/employment provided are true and accurate. I understand that submitting fake documents will lead to legal action and a permanent platform ban.`,
     },
     {
       id: "owner-declaration",
       title: "Owner Declaration",
-      content: `I declare that I am the legal owner or authorized property manager of the listing, and that all descriptions, pricing, and pictures match the actual state of the property. I agree to keep pricing fair and transparent.`
+      content: `I declare that I am the legal owner or authorized property manager of the listing, and that all descriptions, pricing, and pictures match the actual state of the property. I agree to keep pricing fair and transparent.`,
     },
     {
       id: "cancellation",
@@ -149,15 +152,15 @@ We promote safety and respect. Discrimination, fraudulent documentation uploads,
       content: `# Cancellation Policy
 Last updated: June 1, 2026
 
-How to cancel: You can cancel your subscription at any time from your account settings. Cancellation takes effect at the end of your current billing period. You will not be charged again after cancellation.`
-    }
+How to cancel: You can cancel your subscription at any time from your account settings. Cancellation takes effect at the end of your current billing period. You will not be charged again after cancellation.`,
+    },
   ];
 
   for (const page of cmsPages) {
     await prisma.cmsPage.upsert({
       where: { id: page.id },
       update: { title: page.title, content: page.content },
-      create: page
+      create: page,
     });
   }
 
@@ -173,4 +176,3 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-

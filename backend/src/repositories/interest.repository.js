@@ -39,9 +39,9 @@ function findPropertyById(prisma, propertyId) {
   });
 }
 
-function findByTenantAndProperty(prisma, tenantId, propertyId) {
+function findActiveByTenantAndProperty(prisma, tenantId, propertyId) {
   return prisma.inquiry.findFirst({
-    where: { tenantId, propertyId },
+    where: { tenantId, propertyId, tenantDeletedAt: null },
   });
 }
 
@@ -179,7 +179,7 @@ function incrementApproachUsage(prisma, subscriptionId, approachesAllowed) {
 
 module.exports = {
   findPropertyById,
-  findByTenantAndProperty,
+  findActiveByTenantAndProperty,
   findPendingByOwner,
   findInterestRequestById,
   countTenantRequestsSince,

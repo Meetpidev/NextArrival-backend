@@ -7,7 +7,10 @@ function parseServiceAccount() {
   try {
     return getFirebaseServiceAccount();
   } catch (err) {
-    console.error("[Firebase] Invalid Firebase credential configuration:", err.message);
+    console.error(
+      "[Firebase] Invalid Firebase credential configuration:",
+      err.message,
+    );
     return null;
   }
 }
@@ -54,8 +57,9 @@ async function sendPushNotification({ tokens, title, message, data = {} }) {
   if (!messaging) {
     return { successCount: 0, failureCount: 0, invalidTokens: [] };
   }
+  let response;
   try {
-    const response = await messaging.sendEachForMulticast({
+    response = await messaging.sendEachForMulticast({
       tokens,
       notification: {
         title,
@@ -85,7 +89,6 @@ async function sendPushNotification({ tokens, title, message, data = {} }) {
       invalidTokens.push(tokens[index]);
     }
   });
-
   return {
     successCount: response.successCount,
     failureCount: response.failureCount,
@@ -94,4 +97,3 @@ async function sendPushNotification({ tokens, title, message, data = {} }) {
 }
 
 module.exports = { sendPushNotification };
-

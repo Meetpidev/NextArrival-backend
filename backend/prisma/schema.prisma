@@ -259,7 +259,6 @@ model Inquiry {
   updatedAt        DateTime              @updatedAt
   auditLogs        InquiryAuditLog[]
 
-  @@unique([tenantId, propertyId], map: "inquiries_tenant_property_unique_idx")
   @@index([tenantId])
   @@index([ownerId])
   @@index([propertyId])
