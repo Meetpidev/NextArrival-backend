@@ -12,6 +12,7 @@
 const { prisma } = require("../config/db");
 const jwt = require("jsonwebtoken");
 const { env } = require("../config/env");
+const { caches, clearListingCaches } = require("../config/cache");
 const { sendServerError } = require("../utils/http");
 const JWT_COOKIE_NAME = "nestarrival_session";
 
@@ -51,10 +52,11 @@ exports.getListings = async (req, res) => {
     const { scope, city, minRent, maxRent, bedrooms, bathrooms } = req.query;
 
     const { cursor, pageSize } = parseCursorPagination(req.query);
+    const isPublicListingSearch = scope !== "mine" && scope !== "all";
 
     const whereClause = {};
 
-    if (scope === "mine" || scope === "all") {
+    if (!isPublicListingSearch) {
       const token = req.cookies[JWT_COOKIE_NAME];
       if (!token) {
         return res
@@ -113,21 +115,42 @@ exports.getListings = async (req, res) => {
       }
     }
 
-    const listings = await prisma.listing.findMany({
-      where: whereClause,
-      include: {
-        owner: {
-          select: { id: true, fullName: true, email: true, isVerified: true },
+    const loadListings = async () => {
+      const listings = await prisma.listing.findMany({
+        where: whereClause,
+        include: {
+          owner: {
+            select: { id: true, fullName: true, email: true, isVerified: true },
+          },
         },
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      take: pageSize + 1,
-    });
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        take: pageSize + 1,
+      });
 
-    const page = buildCursorPage(listings, pageSize);
+      const page = buildCursorPage(listings, pageSize);
+      return { listings: page.items, pageInfo: page.pageInfo };
+    };
 
-    res.json({ listings: page.items, pageInfo: page.pageInfo });
+    const payload = isPublicListingSearch
+      ? await caches.listings.remember(
+          [
+            "public-list",
+            {
+              cursor,
+              pageSize,
+              city: city ? String(city) : null,
+              minRent: minRent ? String(minRent) : null,
+              maxRent: maxRent ? String(maxRent) : null,
+              bedrooms: bedrooms ? String(bedrooms) : null,
+              bathrooms: bathrooms ? String(bathrooms) : null,
+            },
+          ],
+          loadListings,
+        )
+      : await loadListings();
+
+    res.json(payload);
   } catch (err) {
     if (err.code === "P2025") {
       return res.status(400).json({ error: "Invalid listing cursor" });
@@ -143,6 +166,12 @@ exports.getListings = async (req, res) => {
 
 exports.getListingById = async (req, res) => {
   try {
+    const listingCacheKey = ["detail", req.params.id];
+    const cachedListing = caches.listings.get(listingCacheKey);
+    if (cachedListing) {
+      return res.json(cachedListing);
+    }
+
     const item = await prisma.listing.findUnique({
       where: { id: req.params.id },
       include: {
@@ -174,6 +203,10 @@ exports.getListingById = async (req, res) => {
       } catch (error) {
         return res.status(403).json({ error: "Listing not available" });
       }
+    }
+
+    if (item.status === "APPROVED") {
+      caches.listings.set(listingCacheKey, item);
     }
 
     res.json(item);
@@ -251,6 +284,7 @@ exports.createListing = async (req, res) => {
         status: "PENDING_REVIEW",
       },
     });
+    clearListingCaches();
     res.json(listing);
   } catch (err) {
     return sendServerError(
@@ -350,6 +384,7 @@ exports.updateListing = async (req, res) => {
       data: updates,
     });
 
+    clearListingCaches(req.params.id);
     res.json(updated);
   } catch (err) {
     return sendServerError(
@@ -374,6 +409,7 @@ exports.archiveListing = async (req, res) => {
       data: { status: "ARCHIVED" },
     });
 
+    clearListingCaches(req.params.id);
     res.json({ message: "Listing archived successfully." });
   } catch (err) {
     return sendServerError(

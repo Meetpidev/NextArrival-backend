@@ -9,10 +9,13 @@
 
 const { prisma } = require("../config/db");
 const { sendServerError } = require("../utils/http");
+const { caches, clearCmsCaches } = require("../config/cache");
 
 exports.getPages = async (req, res) => {
   try {
-    const list = await prisma.cmsPage.findMany();
+    const list = await caches.cms.remember(["pages"], () =>
+      prisma.cmsPage.findMany(),
+    );
     res.json(list);
   } catch (err) {
     return sendServerError(res, err, "Failed to fetch CMS pages");
@@ -21,9 +24,16 @@ exports.getPages = async (req, res) => {
 
 exports.getPage = async (req, res) => {
   try {
-    const page = await prisma.cmsPage.findUnique({
-      where: { id: req.params.id },
-    });
+    const pageCacheKey = ["page", req.params.id];
+    let page = caches.cms.get(pageCacheKey);
+    if (!page) {
+      page = await prisma.cmsPage.findUnique({
+        where: { id: req.params.id },
+      });
+      if (page) {
+        caches.cms.set(pageCacheKey, page);
+      }
+    }
 
     if (!page) return res.status(404).json({ error: "CMS page not found" });
 
@@ -46,6 +56,7 @@ exports.updatePage = async (req, res) => {
       data: { title, content },
     });
 
+    clearCmsCaches(id);
     res.json(updated);
   } catch (err) {
     return sendServerError(res, err, "Failed to update CMS page");

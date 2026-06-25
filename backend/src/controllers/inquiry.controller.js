@@ -1,6 +1,7 @@
 const { childLogger } = require("../config/logger");
 const logger = childLogger("inquiry-controller");
 const { prisma } = require("../config/db");
+const { caches } = require("../config/cache");
 const crypto = require("crypto");
 const {
   contactUsSchema,
@@ -190,24 +191,28 @@ exports.submitPartnerWithUs = async (req, res) => {
 
 exports.getAcceptedPartners = async (req, res) => {
   try {
-    const partners = await prisma.partnerInquiry.findMany({
-      where: { status: "ACCEPTED" },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        partnershipType: true,
-        organizationName: true,
-        fullName: true,
-        email: true,
-        phone: true,
-        country: true,
-        cityRegion: true,
-        partnershipGoal: true,
-        tellUsMore: true,
-        status: true,
-        createdAt: true,
-      },
-    });
+    const partners = await caches.acceptedPartners.remember(
+      ["public-list"],
+      () =>
+        prisma.partnerInquiry.findMany({
+          where: { status: "ACCEPTED" },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            partnershipType: true,
+            organizationName: true,
+            fullName: true,
+            email: true,
+            phone: true,
+            country: true,
+            cityRegion: true,
+            partnershipGoal: true,
+            tellUsMore: true,
+            status: true,
+            createdAt: true,
+          },
+        }),
+    );
 
     return res.json({
       success: true,

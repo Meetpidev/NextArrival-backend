@@ -12,6 +12,10 @@ const logger = childLogger("admin-controller");
 
 const { prisma } = require("../config/db");
 const {
+  clearListingCaches,
+  clearAcceptedPartnersCache,
+} = require("../config/cache");
+const {
   isZodError,
   sendValidationError,
   sendServerError,
@@ -193,6 +197,7 @@ exports.moderateListing = async (req, res) => {
       data: { status, adminFeedback: feedback || null },
     });
 
+    clearListingCaches(listingId);
     res.json({ message: "Listing moderated successfully", status });
   } catch (err) {
     return sendServerError(
@@ -570,6 +575,7 @@ exports.updatePartnerRequestStatus = async (req, res) => {
     }
 
     const request = await updatePartnerRequestStatus({ id, status });
+    clearAcceptedPartnersCache();
 
     if (status === "ACCEPTED") {
       try {

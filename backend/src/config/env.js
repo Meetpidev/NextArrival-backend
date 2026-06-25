@@ -1,6 +1,14 @@
 const path = require("path");
 
 const DEFAULT_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"];
+const configLogger = {
+  warn(meta, message) {
+    process.emitWarning(`${message}: ${JSON.stringify(meta)}`);
+  },
+  error(meta, message) {
+    process.stderr.write(`${message}: ${JSON.stringify(meta)}\n`);
+  },
+};
 
 function text(key, fallback = "") {
   const value = process.env[key];
@@ -66,6 +74,16 @@ const env = {
   log: {
     level: text("LOG_LEVEL", text("NODE_ENV", "development") === "production" ? "info" : "debug"),
     pretty: bool("LOG_PRETTY", text("NODE_ENV", "development") !== "production"),
+  },
+  cache: {
+    enabled: bool("CACHE_ENABLED", true),
+    maxItems: int("CACHE_MAX_ITEMS", 500, { min: 1 }),
+    ttlMs: int("CACHE_TTL_MS", 60 * 1000, { min: 1 }),
+    listingsTtlMs: int("CACHE_LISTINGS_TTL_MS", 30 * 1000, { min: 1 }),
+    cmsTtlMs: int("CACHE_CMS_TTL_MS", 5 * 60 * 1000, { min: 1 }),
+    acceptedPartnersTtlMs: int("CACHE_ACCEPTED_PARTNERS_TTL_MS", 60 * 1000, {
+      min: 1,
+    }),
   },
 
   databaseUrl: text("DATABASE_URL"),

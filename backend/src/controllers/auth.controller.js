@@ -352,49 +352,101 @@ exports.verifyOtp = async (req, res) => {
       where: { email: normalizedEmail },
     });
 
-    if (!pendingUser) {
+    if (pendingUser) {
+      if (new Date() > pendingUser.otpExpiry) {
+        return res.status(400).json({ error: "OTP expired" });
+      }
+
+      if (pendingUser.otpAttempts >= OTP_MAX_ATTEMPTS) {
+        return res.status(429).json({ error: "Too many attempts" });
+      }
+
+      if (!isOtpMatch(pendingUser.otp, otp)) {
+        await prisma.pendingUser.update({
+          where: { email: normalizedEmail },
+          data: { otpAttempts: pendingUser.otpAttempts + 1 },
+        });
+        return res.status(400).json({ error: "Invalid OTP" });
+      }
+
+      const user = await prisma.$transaction(async (tx) => {
+        const stagedUser = await tx.pendingUser.delete({
+          where: { email: normalizedEmail },
+        });
+
+        return tx.user.create({
+          data: {
+            email: stagedUser.email,
+            passwordHash: stagedUser.passwordHash,
+            fullName: stagedUser.fullName,
+            role: stagedUser.role,
+            isVerified: true,
+            verificationStatus: "UNVERIFIED",
+          },
+        });
+      });
+
+      const token = createToken(user);
+      setCookie(res, token);
+
+      return res.status(201).json({
+        message: "Account verified successfully",
+        user: serializeAuthUser(user),
+      });
+    }
+
+    const legacyUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
+
+    if (!legacyUser || legacyUser.isVerified) {
       return res.status(404).json({
         error: "No pending email verification found",
       });
     }
 
-    if (new Date() > pendingUser.otpExpiry) {
+    if (legacyUser.isBanned) {
+      return res.status(403).json({ error: "Account banned" });
+    }
+
+    if (!legacyUser.otp || !legacyUser.otpExpiry) {
+      return res.status(400).json({
+        error: "No verification OTP found. Please request a new OTP.",
+      });
+    }
+
+    if (new Date() > legacyUser.otpExpiry) {
       return res.status(400).json({ error: "OTP expired" });
     }
 
-    if (pendingUser.otpAttempts >= OTP_MAX_ATTEMPTS) {
+    if (legacyUser.otpAttempts >= OTP_MAX_ATTEMPTS) {
       return res.status(429).json({ error: "Too many attempts" });
     }
 
-    if (!isOtpMatch(pendingUser.otp, otp)) {
-      await prisma.pendingUser.update({
-        where: { email: normalizedEmail },
-        data: { otpAttempts: pendingUser.otpAttempts + 1 },
+    if (!isOtpMatch(legacyUser.otp, otp)) {
+      await prisma.user.update({
+        where: { id: legacyUser.id },
+        data: { otpAttempts: legacyUser.otpAttempts + 1 },
       });
       return res.status(400).json({ error: "Invalid OTP" });
     }
 
-    const user = await prisma.$transaction(async (tx) => {
-      const stagedUser = await tx.pendingUser.delete({
-        where: { email: normalizedEmail },
-      });
-
-      return tx.user.create({
-        data: {
-          email: stagedUser.email,
-          passwordHash: stagedUser.passwordHash,
-          fullName: stagedUser.fullName,
-          role: stagedUser.role,
-          isVerified: true,
-          verificationStatus: "UNVERIFIED",
-        },
-      });
+    const user = await prisma.user.update({
+      where: { id: legacyUser.id },
+      data: {
+        isVerified: true,
+        otp: null,
+        otpExpiry: null,
+        otpAttempts: 0,
+        otpLastSentAt: null,
+        verificationStatus: "UNVERIFIED",
+      },
     });
 
     const token = createToken(user);
     setCookie(res, token);
 
-    return res.status(201).json({
+    return res.json({
       message: "Account verified successfully",
       user: serializeAuthUser(user),
     });
@@ -414,7 +466,6 @@ exports.verifyOtp = async (req, res) => {
     return res.status(400).json({ error: "Invalid OTP" });
   }
 };
-
 exports.resendOtp = async (req, res) => {
   try {
     const { email } = resendOtpSchema.parse(req.body);
@@ -424,15 +475,65 @@ exports.resendOtp = async (req, res) => {
       where: { email: normalizedEmail },
     });
 
-    if (!pendingUser) {
+    if (pendingUser) {
+      if (
+        pendingUser.otpLastSentAt &&
+        Date.now() - new Date(pendingUser.otpLastSentAt).getTime() <
+          OTP_RESEND_COOLDOWN_MS
+      ) {
+        return res.status(429).json({
+          error: "Wait before requesting OTP again",
+        });
+      }
+
+      const { otp, otpHash, otpExpiry } = createOtp();
+
+      try {
+        await sendVerificationOtp(normalizedEmail, otp);
+      } catch (mailError) {
+        logger.error({ err: mailError }, "Resend OTP email failed");
+        return res.status(503).json({
+          error: "Verification email could not be sent. Please try again later.",
+        });
+      }
+
+      await prisma.pendingUser.update({
+        where: { email: normalizedEmail },
+        data: {
+          otp: otpHash,
+          otpExpiry,
+          otpAttempts: 0,
+          otpLastSentAt: new Date(),
+        },
+      });
+
+      return res.json({
+        message: "OTP resent successfully",
+        email: normalizedEmail,
+      });
+    }
+
+    const legacyUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
+
+    if (!legacyUser) {
       return res.status(404).json({
         error: "No pending email verification found",
       });
     }
 
+    if (legacyUser.isBanned) {
+      return res.status(403).json({ error: "Account banned" });
+    }
+
+    if (legacyUser.isVerified) {
+      return res.status(400).json({ error: "Account is already verified" });
+    }
+
     if (
-      pendingUser.otpLastSentAt &&
-      Date.now() - new Date(pendingUser.otpLastSentAt).getTime() <
+      legacyUser.otpLastSentAt &&
+      Date.now() - new Date(legacyUser.otpLastSentAt).getTime() <
         OTP_RESEND_COOLDOWN_MS
     ) {
       return res.status(429).json({
@@ -441,8 +542,18 @@ exports.resendOtp = async (req, res) => {
     }
 
     const { otp, otpHash, otpExpiry } = createOtp();
-    await prisma.pendingUser.update({
-      where: { email: normalizedEmail },
+
+    try {
+      await sendVerificationOtp(normalizedEmail, otp);
+    } catch (mailError) {
+      logger.error({ err: mailError }, "Legacy resend OTP email failed");
+      return res.status(503).json({
+        error: "Verification email could not be sent. Please try again later.",
+      });
+    }
+
+    await prisma.user.update({
+      where: { id: legacyUser.id },
       data: {
         otp: otpHash,
         otpExpiry,
@@ -450,15 +561,6 @@ exports.resendOtp = async (req, res) => {
         otpLastSentAt: new Date(),
       },
     });
-
-    try {
-      await sendVerificationOtp(normalizedEmail, otp);
-    } catch (mailError) {
-      logger.error({ err: mailError }, "Resend OTP email failed");
-      return res.status(503).json({
-        error: "Verification email could not be sent. Please try again later.",
-      });
-    }
 
     return res.json({
       message: "OTP resent successfully",
@@ -475,7 +577,6 @@ exports.resendOtp = async (req, res) => {
     );
   }
 };
-
 exports.logout = async (req, res) => {
   res.clearCookie(JWT_COOKIE_NAME, { path: "/" });
   res.json({ message: "Logout successful" });
