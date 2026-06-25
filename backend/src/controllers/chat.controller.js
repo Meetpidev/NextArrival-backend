@@ -1,3 +1,5 @@
+const { childLogger } = require("../config/logger");
+const logger = childLogger("chat-controller");
 const { prisma } = require("../config/db");
 const {
   chatQuerySchema,
@@ -27,7 +29,7 @@ async function notifyChatReceiver(room, sender, content) {
       relatedType: "ChatRoom",
     });
   } catch (err) {
-    console.error("Chat notification failed:", err);
+    logger.error({ err }, "Chat notification failed");
   }
 }
 
@@ -83,7 +85,7 @@ exports.getRooms = async (req, res) => {
     if (isZodError(err)) {
       return sendValidationError(res, err);
     }
-    console.error("Chat rooms fetch error:", err);
+    logger.error({ err }, "Chat rooms fetch error");
     res.status(500).json({ error: "Unable to retrieve chat rooms" });
   }
 };
@@ -122,7 +124,7 @@ exports.getMessages = async (req, res) => {
     if (isZodError(err)) {
       return sendValidationError(res, err);
     }
-    console.error("Chat messages fetch error:", err);
+    logger.error({ err }, "Chat messages fetch error");
     res.status(500).json({ error: "Unable to retrieve messages" });
   }
 };
@@ -177,7 +179,7 @@ exports.getRoomMessages = async (req, res) => {
         error: "Invalid message cursor",
       });
     }
-    console.error("Cursor chat messages fetch error:", err);
+    logger.error({ err }, "Cursor chat messages fetch error");
     res.status(500).json({
       success: false,
       error: "Unable to retrieve messages",
@@ -218,7 +220,7 @@ exports.sendMessage = async (req, res) => {
     if (isZodError(err)) {
       return sendValidationError(res, err);
     }
-    console.error("Send message error:", err);
+    logger.error({ err }, "Send message error");
     res.status(500).json({ error: "Unable to send message" });
   }
 };

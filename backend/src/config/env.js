@@ -18,7 +18,7 @@ function int(key, fallback, { min, max } = {}) {
   if (!value) return fallback;
 
   if (!/^-?\d+$/.test(value)) {
-    console.warn(`Invalid integer for ${key}; using ${fallback}`);
+    configLogger.warn({ key, fallback }, "Invalid integer env value; using fallback");
     return fallback;
   }
 
@@ -28,7 +28,7 @@ function int(key, fallback, { min, max } = {}) {
     (min !== undefined && parsed < min) ||
     (max !== undefined && parsed > max)
   ) {
-    console.warn(`Out-of-range integer for ${key}; using ${fallback}`);
+    configLogger.warn({ key, fallback, min, max }, "Out-of-range integer env value; using fallback");
     return fallback;
   }
 
@@ -63,6 +63,10 @@ const env = {
   isProduction: text("NODE_ENV", "development") === "production",
   port: int("PORT", 5000, { min: 0, max: 65535 }),
   requestLogging: bool("REQUEST_LOGGING", false),
+  log: {
+    level: text("LOG_LEVEL", text("NODE_ENV", "development") === "production" ? "info" : "debug"),
+    pretty: bool("LOG_PRETTY", text("NODE_ENV", "development") !== "production"),
+  },
 
   databaseUrl: text("DATABASE_URL"),
   jwtSecret: text("JWT_SECRET"),
@@ -111,6 +115,9 @@ const env = {
 
   aws: {
     region: text("AWS_REGION") || text("AWS_DEFAULT_REGION"),
+    accessKeyId: text("AWS_ACCESS_KEY_ID"),
+    secretAccessKey: text("AWS_SECRET_ACCESS_KEY"),
+    sessionToken: text("AWS_SESSION_TOKEN"),
     notificationQueueUrl:
       text("NOTIFICATION_QUEUE_URL") || text("AWS_SQS_QUEUE_URL"),
   },
@@ -126,9 +133,7 @@ function validateRequiredEnv() {
   }
 
   if (missing.length > 0) {
-    console.error(
-      `Missing required environment variables: ${missing.join(", ")}`,
-    );
+    configLogger.error({ missing }, "Missing required environment variables");
     process.exit(1);
   }
 

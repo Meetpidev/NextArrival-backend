@@ -32,7 +32,7 @@ function getSqsClient() {
 async function enqueueNotificationJob(payload) {
   const queueUrl = getQueueUrl();
   if (!queueUrl) {
-    console.warn("[NotificationQueue] Queue URL is not configured. Skipping enqueue.");
+    logger.warn("Queue URL is not configured. Skipping enqueue");
     return { queued: false, reason: "QUEUE_URL_NOT_CONFIGURED" };
   }
 
@@ -49,7 +49,7 @@ async function enqueueNotificationJob(payload) {
 async function receiveNotificationJobs() {
   const queueUrl = getQueueUrl();
   if (!queueUrl) {
-    console.warn("[NotificationQueue] Queue URL is not configured. Skipping receive.");
+    logger.warn("Queue URL is not configured. Skipping receive");
     return [];
   }
 
@@ -68,7 +68,7 @@ async function receiveNotificationJobs() {
 async function deleteNotificationJob(receiptHandle) {
   const queueUrl = getQueueUrl();
   if (!queueUrl) {
-    console.warn("[NotificationQueue] Queue URL is not configured. Skipping delete.");
+    logger.warn("Queue URL is not configured. Skipping delete");
     return { deleted: false, reason: "QUEUE_URL_NOT_CONFIGURED" };
   }
 

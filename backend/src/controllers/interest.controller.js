@@ -1,3 +1,5 @@
+const { childLogger } = require("../config/logger");
+const logger = childLogger("interest-controller");
 const {
   createInterestRequestSchema,
   interestPendingQuerySchema,
@@ -30,7 +32,7 @@ function sendInterestError(res, err) {
     });
   }
 
-  console.error("Interest request error:", err);
+  logger.error({ err }, "Interest request error");
   return res.status(500).json({
     success: false,
     error: "Unable to process interest request",

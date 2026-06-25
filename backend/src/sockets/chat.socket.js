@@ -66,7 +66,7 @@ function initChatSocket(io) {
 
         socket.join(roomId);
       } catch (err) {
-        console.error("Error joining room:", err);
+        logger.error({ err, roomId }, "Error joining room");
       }
     });
 
@@ -104,12 +104,12 @@ function initChatSocket(io) {
           relatedId: room.id,
           relatedType: "ChatRoom",
         }).catch((err) => {
-          console.error("Socket chat notification failed:", err);
+          logger.error({ err, roomId, receiverId }, "Socket chat notification failed");
         });
 
         io.to(roomId).emit("message", msg);
       } catch (err) {
-        console.error("Error sending message:", err.message);
+        logger.error({ err, roomId }, "Error sending message");
         socket.emit("error", { message: "Failed to send message" });
       }
     });

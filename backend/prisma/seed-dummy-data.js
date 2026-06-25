@@ -7,7 +7,7 @@ const { env } = require("../src/config/env");
 
 const connectionString = env.databaseUrl;
 if (!connectionString) {
-  console.error("DATABASE_URL is not defined in backend .env");
+  logger.error("DATABASE_URL is not defined in backend .env");
   process.exit(1);
 }
 
@@ -24,7 +24,7 @@ if (connectionString.startsWith("prisma+postgres://")) {
       }
     }
   } catch (e) {
-    console.error("Failed to parse URL:", e);
+    logger.error({ err: e }, "Failed to parse database URL");
   }
 }
 
@@ -33,7 +33,7 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  console.log("Seeding dummy data started...");
+  logger.info("Seeding dummy data started");
 
   const salt = await bcrypt.genSalt(10);
   const hash = await bcrypt.hash("NestArrivalTest2026!", salt);
@@ -60,7 +60,7 @@ async function main() {
         isUrgentMatch: true,
       }
     });
-    console.log("Test Tenant created: tenant_test@nestarrival.ca / NestArrivalTest2026!");
+    logger.info({ email: tenantEmail }, "Test tenant created");
   }
 
   // 2. Create a Vetted Owner
@@ -78,7 +78,7 @@ async function main() {
         residencyStatus: "Canadian Citizen"
       }
     });
-    console.log("Test Owner created: owner_test@nestarrival.ca / NestArrivalTest2026!");
+    logger.info({ email: ownerEmail }, "Test owner created");
   }
 
   // 3. Purchase Subscription Plan for Tenant (Standard or Elite)
@@ -100,7 +100,7 @@ async function main() {
         isActive: true
       }
     });
-    console.log("Elite Subscription purchased for Test Tenant.");
+    logger.info({ tenantId: tenant.id }, "Elite subscription purchased for test tenant");
   }
 
   // 4. Create Approved Property Listings for Owner
@@ -154,7 +154,7 @@ async function main() {
           status: "APPROVED"
         }
       });
-      console.log(`Property seeded: "${item.title}"`);
+      logger.info({ title: item.title }, "Property seeded");
     }
     createdListings.push(list);
   }
@@ -206,15 +206,15 @@ async function main() {
         }
       });
     }
-    console.log("Chat connection and messages history seeded successfully.");
+    logger.info("Chat connection and message history seeded successfully");
   }
 
-  console.log("Seeding dummy data completed.");
+  logger.info("Seeding dummy data completed");
 }
 
 main()
   .catch((e) => {
-    console.error("Error seeding dummy data:", e);
+    logger.error({ err: e }, "Error seeding dummy data");
     process.exit(1);
   })
   .finally(async () => {

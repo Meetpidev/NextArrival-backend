@@ -81,29 +81,29 @@ function setCookie(res, token) {
 }
 
 exports.signup = async (req, res) => {
-  console.log("[Auth Controller] Signup request received. Email:", req.body?.email);
+  logger.info("Signup request received");
   try {
     const result = signupSchema.safeParse(req.body);
 
     if (!result.success) {
-      console.log("[Auth Controller] Signup validation failed:", result.error.errors);
+      logger.warn({ errors: result.error.errors }, "Signup validation failed");
       return sendValidationError(res, result.error);
     }
 
     const { email, password, fullName, role } = result.data;
     const normalizedEmail = email.toLowerCase();
 
-    console.log("[Auth Controller] Database query: Checking if user already exists...");
+    logger.debug("Checking for existing user during signup");
     const existingUser = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
 
     if (existingUser) {
-      console.log("[Auth Controller] Signup duplicate email conflict.");
+      logger.info("Signup duplicate email conflict");
       return res.status(409).json({ error: "Email already registered" });
     }
 
-    console.log("[Auth Controller] Hashing password...");
+    logger.debug("Hashing signup password");
     const passwordHash = await bcrypt.hash(password, 10);
 
     const { otp, otpHash, otpExpiry } = createOtp();
@@ -134,24 +134,24 @@ exports.signup = async (req, res) => {
     });
 
     try {
-      console.log("[Auth Controller] Dispatching verification OTP to email...");
+      logger.debug("Dispatching verification OTP email");
       await sendVerificationOtp(normalizedEmail, otp);
-      console.log("[Auth Controller] OTP dispatched successfully.");
+      logger.info("OTP dispatched successfully");
     } catch (mailError) {
-      console.error("[Auth Controller] Signup OTP email dispatch failed:", mailError.message);
+      logger.error({ err: mailError }, "Signup OTP email dispatch failed");
       return res.status(503).json({
         error:
           "Account details saved, but verification email could not be sent. Please request a new OTP.",
       });
     }
 
-    console.log("[Auth Controller] Signup flow initiated successfully (waiting for verification).");
+    logger.info("Signup flow initiated successfully");
     res.json({
       message: "Signup initiated. OTP sent to email.",
       email: normalizedEmail,
     });
   } catch (err) {
-    console.error("[Auth Controller] Signup error caught:", err.message);
+    logger.error({ err }, "Signup error caught");
     if (isZodError(err)) {
       return sendValidationError(res, err);
     }
@@ -164,38 +164,38 @@ exports.signup = async (req, res) => {
 };
 
 exports.login = async (req, res) => {
-  console.log("[Auth Controller] Login request received. Email:", req.body?.email);
+  logger.info("Login request received");
   try {
     const { email, password } = loginSchema.parse(req.body);
 
-    console.log("[Auth Controller] Database query: Finding user by email...");
+    logger.debug("Finding user by email during login");
     const user = await prisma.user.findUnique({
       where: { email: email.toLowerCase() },
     });
     if (!user) {
-      console.log("[Auth Controller] Login failed: User email not found in database.");
+      logger.info("Login failed: user not found");
       return res.status(400).json({ error: "Invalid credentials" });
     }
     if (!user.passwordHash) {
-      console.log("[Auth Controller] Login failed: User has no password hash set (OAuth only?).");
+      logger.info("Login failed: user has no password hash");
       return res.status(400).json({ error: "Invalid credentials" });
     }
-    console.log("[Auth Controller] Comparing password hash...");
+    logger.debug("Comparing password hash");
     const match = await bcrypt.compare(password, user.passwordHash);
     if (!match) {
-      console.log("[Auth Controller] Login failed: Password mismatch.");
+      logger.info("Login failed: password mismatch");
       return res.status(400).json({ error: "Invalid credentials" });
     }
     if (user.isBanned) {
-      console.log("[Auth Controller] Login failed: Account is banned.");
+      logger.info("Login failed: account is banned");
       return res.status(403).json({ error: "Account banned" });
     }
     if (user.isVerified) {
-      console.log("[Auth Controller] User is verified. Generating JWT session token...");
+      logger.debug("Generating JWT session token");
       const token = createToken(user);
       setCookie(res, token);
 
-      console.log("[Auth Controller] Login successful for verified user:", user.email);
+      logger.info({ userId: user.id }, "Login successful for verified user");
       return res.json({
         message: "Login successful",
         user: {
@@ -207,18 +207,18 @@ exports.login = async (req, res) => {
         },
       });
     }
-    console.log("[Auth Controller] User is not verified. Initializing verification OTP flow...");
+    logger.info("Initializing login verification OTP flow");
     if (
       user.otpLastSentAt &&
       Date.now() - new Date(user.otpLastSentAt).getTime() < 60_000
     ) {
-      console.log("[Auth Controller] OTP request throttled (sent less than 60s ago).");
+      logger.info("OTP request throttled");
       return res.status(429).json({
         error: "Wait before requesting OTP again",
       });
     }
     const { otp, otpHash, otpExpiry } = createOtp();
-    console.log("[Auth Controller] Database query: Updating user OTP details...");
+    logger.debug("Updating user OTP details");
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -229,27 +229,27 @@ exports.login = async (req, res) => {
       },
     });
     try {
-      console.log("[Auth Controller] Dispatching verification OTP to email...");
+      logger.debug("Dispatching verification OTP email");
       await sendVerificationOtp(user.email, otp);
-      console.log("[Auth Controller] OTP dispatched successfully.");
+      logger.info("OTP dispatched successfully");
     } catch (mailError) {
-      console.error("[Auth Controller] Login OTP email dispatch failed:", mailError.message);
+      logger.error({ err: mailError }, "Login OTP email dispatch failed");
       return res.status(503).json({
         error: "Verification email could not be sent. Please try again later.",
       });
     }
-    console.log("[Auth Controller] OTP flow initiated. Redirecting user to verification screen.");
+    logger.info("OTP flow initiated");
     return res.json({
       message: "OTP sent for verification",
       isVerified: false,
       email: user.email,
     });
   } catch (err) {
-    console.error("[Auth Controller] Login error caught:", err.message);
+    logger.error({ err }, "Login error caught");
     if (isZodError(err)) {
       return sendValidationError(res, err);
     }
-    console.error("Login error:", err);
+    logger.error({ err }, "Login error");
     return res.status(400).json({ error: "Invalid credentials" });
   }
 };
@@ -325,7 +325,7 @@ exports.googleLogin = async (req, res) => {
     if (isZodError(err)) {
       return sendValidationError(res, err);
     }
-    console.error("Google login error:", err);
+    logger.error({ err }, "Google login error");
     res.status(500).json({ error: "An error occurred during Google login" });
   }
 };
@@ -471,7 +471,7 @@ exports.verifyOtp = async (req, res) => {
     if (err.code === "P2002") {
       return res.status(409).json({ error: "Email already registered" });
     }
-    console.error("OTP verification error:", err);
+    logger.error({ err }, "OTP verification error");
     res.status(400).json({ error: "Invalid OTP" });
   }
 };
@@ -509,7 +509,7 @@ exports.resendOtp = async (req, res) => {
       try {
         await sendVerificationOtp(normalizedEmail, otp);
       } catch (mailError) {
-        console.error("Resend OTP email failed:", mailError);
+        logger.error({ err: mailError }, "Resend OTP email failed");
         return res.status(503).json({
           error: "Verification email could not be sent. Please try again later.",
         });
@@ -558,7 +558,7 @@ exports.resendOtp = async (req, res) => {
     try {
       await sendVerificationOtp(normalizedEmail, otp);
     } catch (mailError) {
-      console.error("Resend OTP email failed:", mailError);
+      logger.error({ err: mailError }, "Resend OTP email failed");
       return res.status(503).json({
         error: "Verification email could not be sent. Please try again later.",
       });
@@ -614,7 +614,7 @@ exports.me = async (req, res) => {
 };
 
 exports.forgotPassword = async (req, res) => {
-  console.log("[Auth Controller] Forgot password request received. Email:", req.body?.email);
+  logger.info("Forgot password request received");
   try {
     const { email } = forgotPasswordSchema.parse(req.body);
     const normalizedEmail = email.toLowerCase();
@@ -624,17 +624,17 @@ exports.forgotPassword = async (req, res) => {
     });
 
     if (!user) {
-      console.log("[Auth Controller] Forgot password failed: Email not found.");
+      logger.info("Forgot password failed: email not found");
       return res.status(404).json({ error: "User not found" });
     }
 
     if (user.isBanned) {
-      console.log("[Auth Controller] Forgot password failed: Account is banned.");
+      logger.info("Forgot password failed: account is banned");
       return res.status(403).json({ error: "Account banned" });
     }
 
     const { otp, otpHash, otpExpiry } = createOtp();
-    console.log("[Auth Controller] Database query: Storing reset OTP details...");
+    logger.debug("Storing reset OTP details");
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -646,11 +646,11 @@ exports.forgotPassword = async (req, res) => {
     });
 
     try {
-      console.log("[Auth Controller] Dispatching reset OTP to email...");
+      logger.debug("Dispatching reset OTP email");
       await sendPasswordResetOtp(normalizedEmail, otp);
-      console.log("[Auth Controller] Reset OTP dispatched successfully.");
+      logger.info("Reset OTP dispatched successfully");
     } catch (mailError) {
-      console.error("[Auth Controller] Reset OTP email dispatch failed:", mailError.message);
+      logger.error({ err: mailError }, "Reset OTP email dispatch failed");
       return res.status(503).json({
         error: "Verification email could not be sent. Please try again later.",
       });
@@ -664,13 +664,13 @@ exports.forgotPassword = async (req, res) => {
     if (isZodError(err)) {
       return sendValidationError(res, err);
     }
-    console.error("Forgot password error:", err);
+    logger.error({ err }, "Forgot password error");
     return res.status(500).json({ error: "Internal server error" });
   }
 };
 
 exports.resetPassword = async (req, res) => {
-  console.log("[Auth Controller] Reset password request received. Email:", req.body?.email);
+  logger.info("Reset password request received");
   try {
     const { email, otp, newPassword } = resetPasswordSchema.parse(req.body);
     const normalizedEmail = email.toLowerCase();
@@ -742,7 +742,7 @@ exports.resetPassword = async (req, res) => {
     if (isZodError(err)) {
       return sendValidationError(res, err);
     }
-    console.error("Reset password error:", err);
+    logger.error({ err }, "Reset password error");
     return res.status(500).json({ error: "Internal server error" });
   }
 };

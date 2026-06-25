@@ -30,8 +30,10 @@ function sendServerError(
   logMessage,
   publicMessage = "Internal server error",
 ) {
-  if (logMessage) {
-    console.error(logMessage);
+  if (logMessage instanceof Error) {
+    logger.error({ err: logMessage }, publicMessage);
+  } else if (logMessage) {
+    logger.error({ detail: logMessage }, publicMessage);
   }
 
   return res.status(500).json({ error: publicMessage });

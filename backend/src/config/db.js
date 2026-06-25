@@ -6,7 +6,7 @@ const { env } = require("./env");
 const connectionString = env.databaseUrl;
 
 if (!connectionString) {
-  console.error("DATABASE_URL is not defined in backend .env");
+  logger.error("DATABASE_URL is not defined in backend .env");
   process.exit(1);
 }
 
@@ -26,7 +26,7 @@ if (connectionString.startsWith("prisma+postgres://")) {
       }
     }
   } catch (e) {
-    console.error("Failed to parse proxy URL:", e);
+    logger.error({ err: e }, "Failed to parse proxy URL");
   }
 }
 

@@ -7,7 +7,7 @@ const { env } = require("../src/config/env");
 
 const connectionString = env.databaseUrl;
 if (!connectionString) {
-  console.error("DATABASE_URL is not defined in backend .env");
+  logger.error("DATABASE_URL is not defined in backend .env");
   process.exit(1);
 }
 
@@ -24,7 +24,7 @@ if (connectionString.startsWith("prisma+postgres://")) {
       }
     }
   } catch (e) {
-    console.error("Failed to parse proxy URL:", e);
+    logger.error({ err: e }, "Failed to parse proxy URL");
   }
 }
 const pool = new Pool({ connectionString: resolvedDbUrl });
@@ -32,7 +32,7 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  console.log("Seeding started...");
+  logger.info("Seeding started");
 
   // 1. Seed Admin
   const adminEmail = "admin@nestarrival.ca";
@@ -54,9 +54,9 @@ async function main() {
         verificationStatus: "VERIFIED",
       },
     });
-    console.log("Default Admin Account created successfully.");
+    logger.info({ email: adminEmail }, "Default admin account created");
   } else {
-    console.log("Admin Account already exists.");
+    logger.info({ email: adminEmail }, "Admin account already exists");
   }
 
   // 2. Seed CMS Pages
@@ -164,13 +164,13 @@ How to cancel: You can cancel your subscription at any time from your account se
     });
   }
 
-  console.log("CMS legal documents seeded successfully.");
-  console.log("Seeding completed.");
+  logger.info("CMS legal documents seeded successfully");
+  logger.info("Seeding completed");
 }
 
 main()
   .catch((e) => {
-    console.error("Error seeding:", e);
+    logger.error({ err: e }, "Error seeding");
     process.exit(1);
   })
   .finally(async () => {

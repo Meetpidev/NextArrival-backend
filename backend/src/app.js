@@ -20,6 +20,8 @@ const helmet = require("helmet");
 const { env } = require("./config/env");
 const multer = require("multer");
 const compression = require("compression");
+const pinoHttp = require("pino-http");
+const { childLogger } = require("./config/logger");
 
 // Rate limiter instances shared across route namespaces
 const {
@@ -63,12 +65,22 @@ if (!fs.existsSync(uploadDir)) {
 const app = express();
 
 if (env.requestLogging) {
-  app.use((req, res, next) => {
-    console.log(
-      `[Backend Request] ${req.method} ${req.path} - Received at ${new Date().toISOString()}`,
-    );
-    next();
-  });
+  app.use(
+    pinoHttp({
+      logger: childLogger("http"),
+      customLogLevel(req, res, err) {
+        if (err || res.statusCode >= 500) return "error";
+        if (res.statusCode >= 400) return "warn";
+        return "info";
+      },
+      customSuccessMessage(req, res) {
+        return `${req.method} ${req.url} completed with ${res.statusCode}`;
+      },
+      customErrorMessage(req, res, err) {
+        return `${req.method} ${req.url} failed with ${res.statusCode}: ${err.message}`;
+      },
+    }),
+  );
 }
 
 if (env.isProduction) {
@@ -165,7 +177,7 @@ app.use((err, req, res, next) => {
     return res.status(400).json({ error: err.message });
   }
 
-  console.error("Unhandled request error:", err);
+  req.log?.error({ err }, "Unhandled request error");
   return res.status(500).json({ error: "Internal server error" });
 });
 

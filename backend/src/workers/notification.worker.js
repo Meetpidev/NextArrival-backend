@@ -13,12 +13,12 @@ function sleep(ms) {
 }
 
 process.on("SIGTERM", () => {
-  console.log("[NotificationWorker] SIGTERM received, stopping after current batch...");
+  logger.info("SIGTERM received, stopping after current batch");
   shouldStop = true;
 });
 
 process.on("SIGINT", () => {
-  console.log("[NotificationWorker] SIGINT received, stopping after current batch...");
+  logger.info("SIGINT received, stopping after current batch");
   shouldStop = true;
 });
 
@@ -27,16 +27,16 @@ async function processJob(message) {
   try {
     payload = JSON.parse(message.Body);
   } catch (err) {
-    console.error("[NotificationWorker] Failed to parse message body:", err);
+    logger.error({ err }, "Failed to parse notification message body");
     throw err;
   }
 
   const result = await sendPushNotification(payload);
-  console.log("[NotificationWorker] Push job processed:", result);
+  logger.info({ result }, "Push notification job processed");
 }
 
 async function startNotificationWorker() {
-  console.log("[NotificationWorker] Started.");
+  logger.info("Notification worker started");
 
   while (!shouldStop) {
     try {
@@ -51,16 +51,16 @@ async function startNotificationWorker() {
           await processJob(message);
           await deleteNotificationJob(message.ReceiptHandle);
         } catch (err) {
-          console.error("[NotificationWorker] Job failed:", err);
+          logger.error({ err }, "Notification job failed");
         }
       }
     } catch (err) {
-      console.error("[NotificationWorker] Polling failed:", err);
+      logger.error({ err }, "Notification worker polling failed");
       await sleep(5000);
     }
   }
 
-  console.log("[NotificationWorker] Stopped gracefully.");
+  logger.info("Notification worker stopped gracefully");
 }
 
 if (require.main === module) {

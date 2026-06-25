@@ -1,5 +1,8 @@
 const { google } = require('googleapis');
 const { env, getGoogleSheetsKeyJson } = require('../config/env');
+const { childLogger } = require('../config/logger');
+
+const logger = childLogger('google-sheets-service');
 
 class GoogleSheetsService {
   constructor() {
@@ -12,7 +15,7 @@ class GoogleSheetsService {
   async initializeSheets() {
     try {
       if (!this.SPREADSHEET_ID) {
-        console.warn("[GoogleSheets] GOOGLE_SHEETS_SPREADSHEET_ID is not configured. Sheets integration disabled.");
+        logger.warn("GOOGLE_SHEETS_SPREADSHEET_ID is not configured. Sheets integration disabled");
         return;
       }
 
@@ -27,14 +30,14 @@ class GoogleSheetsService {
 
       const spreadsheet = await this.sheets.spreadsheets.get({ spreadsheetId: this.SPREADSHEET_ID });
       const sheetTitles = spreadsheet.data.sheets.map(s => s.properties.title);
-      console.log('Available sheets:', sheetTitles);
+      logger.info({ sheetTitles }, "Available Google Sheets loaded");
 
       const matched = sheetTitles.find(t => t.toLowerCase().includes('partner'));
       this.PARTNER_SHEET_NAME = matched || sheetTitles[0];
-      console.log(`Using partner sheet: "${this.PARTNER_SHEET_NAME}"`);
+      logger.info({ sheetName: this.PARTNER_SHEET_NAME }, "Using partner sheet");
 
     } catch (error) {
-      console.error('[GoogleSheets] Failed to initialize Google Sheets:', error.message);
+      logger.error({ err: error }, "Failed to initialize Google Sheets");
       this.sheets = null;
     }
   }
@@ -93,10 +96,10 @@ class GoogleSheetsService {
         resource: { values },
       });
 
-      console.log(`Partner request ${partnerData.organizationName} added to sheet`);
+      logger.info({ organizationName: partnerData.organizationName }, "Partner request added to sheet");
       return true;
     } catch (error) {
-      console.error('Error adding partner request to sheet:', error);
+      logger.error({ err: error }, "Error adding partner request to sheet");
       return false;
     }
   }
@@ -125,10 +128,10 @@ class GoogleSheetsService {
         resource: { values },
       });
 
-      console.log(`Partner ${partnerData.organizationName} added to Partner Sheet`);
+      logger.info({ organizationName: partnerData.organizationName }, "Partner added to accepted partner sheet");
       return true;
     } catch (error) {
-      console.error('Error adding accepted partner to sheet:', error);
+      logger.error({ err: error }, "Error adding accepted partner to sheet");
       return false;
     }
   }
@@ -153,7 +156,7 @@ class GoogleSheetsService {
       }
 
       if (rowIndex === -1) {
-        console.warn(`Partner with ID ${partnerId} not found`);
+        logger.warn({ partnerId }, "Partner not found in sheet");
         return false;
       }
 
@@ -164,10 +167,10 @@ class GoogleSheetsService {
         resource: { values: [[newStatus]] },
       });
 
-      console.log(`Partner ${partnerId} status updated to ${newStatus}`);
+      logger.info({ partnerId, status: newStatus }, "Partner status updated in sheet");
       return true;
     } catch (error) {
-      console.error('Error updating partner status in sheet:', error);
+      logger.error({ err: error }, "Error updating partner status in sheet");
       return false;
     }
   }
@@ -192,7 +195,7 @@ class GoogleSheetsService {
       }
 
       if (rowIndex === -1) {
-        console.warn(`Partner with ID ${partnerId} not found`);
+        logger.warn({ partnerId }, "Partner not found in sheet");
         return false;
       }
 
@@ -203,10 +206,10 @@ class GoogleSheetsService {
         resource: { values: [['REJECTED']] },
       });
 
-      console.log(`Partner ${partnerId} marked as REJECTED`);
+      logger.info({ partnerId }, "Partner marked as rejected in sheet");
       return true;
     } catch (error) {
-      console.error('Error marking partner as rejected:', error);
+      logger.error({ err: error }, "Error marking partner as rejected in sheet");
       return false;
     }
   }

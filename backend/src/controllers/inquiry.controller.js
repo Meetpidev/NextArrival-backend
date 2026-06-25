@@ -1,3 +1,5 @@
+const { childLogger } = require("../config/logger");
+const logger = childLogger("inquiry-controller");
 const { prisma } = require("../config/db");
 const crypto = require("crypto");
 const {
@@ -69,7 +71,7 @@ async function notifyAdminsOfInquiry({
       });
     }
   } catch (err) {
-    console.error(`Admin notification failed for ${recordType}:`, err);
+    logger.error({ err, recordType }, "Admin notification failed");
   }
 }
 
@@ -128,7 +130,7 @@ exports.submitContactUs = async (req, res) => {
       return sendValidationError(res, err);
     }
 
-    console.error("[ContactUs] Submission failed:", err);
+    logger.error({ err }, "Contact submission failed");
 
     return sendServerError(
       res,
@@ -176,7 +178,7 @@ exports.submitPartnerWithUs = async (req, res) => {
       return sendValidationError(res, err);
     }
 
-    console.error("[PartnerInquiry] Submission failed:", err);
+    logger.error({ err }, "Partner inquiry submission failed");
 
     return sendServerError(
       res,

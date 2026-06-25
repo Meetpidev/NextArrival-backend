@@ -28,7 +28,7 @@ async function enqueueNotificationJob(payload) {
   try {
     return await queueProvider.enqueueNotificationJob(payload);
   } catch (err) {
-    console.error("[NotificationService] Failed to enqueue notification job:", err);
+    logger.error({ err }, "Failed to enqueue notification job");
     return { queued: false, reason: err.message };
   }
 }
@@ -62,7 +62,7 @@ async function createAdminNotification(data, options = {}) {
   const admins = await repo.findAdmins(client);
 
   if (!admins.length) {
-    console.warn("[NotificationService] No active admin users found for admin notification.");
+    logger.warn("No active admin users found for admin notification");
     return [];
   }
 

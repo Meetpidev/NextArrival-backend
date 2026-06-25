@@ -15,6 +15,6 @@ initSocket(server);
 const PORT = env.port;
 
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  logger.info({ port: PORT }, "Server running");
 });
 

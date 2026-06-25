@@ -1,3 +1,5 @@
+const { childLogger } = require("../config/logger");
+const logger = childLogger("admin-controller");
 /*
  * Admin controller
  *
@@ -574,15 +576,10 @@ exports.updatePartnerRequestStatus = async (req, res) => {
         const inserted =
           await googleSheetsService.addAcceptedPartnerToSheet(current);
         if (!inserted) {
-          console.error(
-            `Accepted partner ${current.id} was saved in the database but not appended to Google Sheets`,
-          );
+          logger.error({ partnerId: current.id }, "Accepted partner saved in database but not appended to Google Sheets");
         }
       } catch (sheetError) {
-        console.error(
-          "Failed to append accepted partner to Google Sheet:",
-          sheetError,
-        );
+        logger.error({ err: sheetError, partnerId: current.id }, "Failed to append accepted partner to Google Sheet");
       }
     }
 
@@ -593,7 +590,7 @@ exports.updatePartnerRequestStatus = async (req, res) => {
         status,
       });
     } catch (mailError) {
-      console.error("Partner decision email failed:", mailError);
+      logger.error({ err: mailError }, "Partner decision email failed");
     }
 
     return res.json({

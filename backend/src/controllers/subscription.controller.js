@@ -1,3 +1,5 @@
+const { childLogger } = require("../config/logger");
+const logger = childLogger("subscription-controller");
 /*
  * Subscription controller
  *
@@ -119,7 +121,7 @@ exports.createSubscription = async (req, res) => {
           "A subscription request is already pending. Please wait before submitting another.",
       });
     }
-    console.error("Subscription creation failed:", err);
+    logger.error({ err }, "Subscription creation failed");
     res.status(500).json({
       error: "Unable to process subscription. Please try again.",
     });
@@ -156,7 +158,7 @@ exports.getSubscriptions = async (req, res) => {
     if (isZodError(err)) {
       return sendValidationError(res, err);
     }
-    console.error("Subscriptions fetch error:", err);
+    logger.error({ err }, "Subscriptions fetch error");
     res.status(500).json({
       error: "Unable to retrieve subscriptions. Please try again.",
     });
@@ -234,7 +236,7 @@ exports.createRefundRequest = async (req, res) => {
     if (isZodError(err)) {
       return sendValidationError(res, err);
     }
-    console.error("Refund request error:", err);
+    logger.error({ err }, "Refund request error");
     res.status(500).json({
       error: "Unable to submit refund request. Please try again.",
     });

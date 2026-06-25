@@ -104,16 +104,10 @@ function enqueueInterestNotification(notification, userIds, logLabel) {
       relatedId: notification.relatedId,
       relatedType: notification.relatedType,
     }).catch((enqueueError) => {
-      console.error(
-        `Failed to enqueue notification after ${logLabel}:`,
-        enqueueError,
-      );
+      logger.error({ err: enqueueError, action: logLabel }, "Failed to enqueue notification after inquiry action");
     });
   } catch (enqueueError) {
-    console.error(
-      `Failed to enqueue notification after ${logLabel}:`,
-      enqueueError,
-    );
+    logger.error({ err: enqueueError, action: logLabel }, "Failed to enqueue notification after inquiry action");
   }
 }
 

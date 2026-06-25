@@ -33,20 +33,17 @@ function maskEmail(email) {
 }
 
 function logConsoleOtp({ label, email, otp, reason }) {
-  console.log(`\n==================================================`);
-  console.log(label);
-  console.log(`To: ${email}`);
-  console.log(`OTP Code: ${otp}`);
-  console.log(`Status: ${reason}. Printed for local testing.`);
-  console.log(`==================================================\n`);
+  logger.warn(
+    { label, email, otpCode: otp, reason },
+    "Email delivery is using console OTP fallback",
+  );
 }
 
 function logConsoleMail({ label, email, reason }) {
-  console.log(`\n==================================================`);
-  console.log(label);
-  console.log(`To: ${email}`);
-  console.log(`Status: ${reason}. Printed for local testing.`);
-  console.log(`==================================================\n`);
+  logger.warn(
+    { label, email, reason },
+    "Email delivery is using console fallback",
+  );
 }
 
 async function sendMail({ email, content, successLabel, otp = null }) {
@@ -86,11 +83,7 @@ async function sendMail({ email, content, successLabel, otp = null }) {
     throw new Error(error.message || "Resend email dispatch failed");
   }
 
-  console.log(
-    `[NestArrival Resend] ${successLabel.sent} sent to ${maskEmail(email)}${
-      data?.id ? ` (${data.id})` : ""
-    }`,
-  );
+  logger.info({ email, provider: "resend", messageId: data?.id }, `${successLabel.sent} sent`);
   return true;
 }
 

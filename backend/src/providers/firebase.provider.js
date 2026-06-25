@@ -7,10 +7,7 @@ function parseServiceAccount() {
   try {
     return getFirebaseServiceAccount();
   } catch (err) {
-    console.error(
-      "[Firebase] Invalid Firebase credential configuration:",
-      err.message,
-    );
+    logger.error({ err }, "Invalid Firebase credential configuration");
     return null;
   }
 }
@@ -19,9 +16,7 @@ function getFirebaseMessaging() {
   if (!initialized) {
     const serviceAccount = parseServiceAccount();
     if (!serviceAccount) {
-      console.warn(
-        "[Firebase] Firebase credentials are not configured. Push skipped.",
-      );
+      logger.warn("Firebase credentials are not configured. Push skipped");
       return null;
     }
 
@@ -32,10 +27,7 @@ function getFirebaseMessaging() {
         });
       }
     } catch (err) {
-      console.error(
-        "[Firebase] Failed to initialize Firebase Admin:",
-        err.message,
-      );
+      logger.error({ err }, "Failed to initialize Firebase Admin");
       return null;
     }
     initialized = true;
@@ -46,7 +38,7 @@ function getFirebaseMessaging() {
 
 async function sendPushNotification({ tokens, title, message, data = {} }) {
   if (!Array.isArray(tokens)) {
-    console.error("[Firebase] Invalid tokens parameter: expected array");
+    logger.error("Invalid tokens parameter: expected array");
     return { successCount: 0, failureCount: 0, invalidTokens: [] };
   }
   if (!tokens.length) {
@@ -73,7 +65,7 @@ async function sendPushNotification({ tokens, title, message, data = {} }) {
       }, {}),
     });
   } catch (err) {
-    console.error("[Firebase] Failed to send push notification:", err.message);
+    logger.error({ err }, "Failed to send push notification");
     return { successCount: 0, failureCount: 0, invalidTokens: [] };
   }
 
