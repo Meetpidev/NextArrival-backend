@@ -1,42 +1,30 @@
-const nodemailer = require("nodemailer");
 const { Resend } = require("resend");
 const { env } = require("../config/env");
 
 const OTP_TTL_MINUTES = 15;
 
+let resendClient = null;
+
+function getResendClient() {
+  if (!resendClient) {
+    resendClient = new Resend(env.mail.resendApiKey);
+  }
+
+  return resendClient;
+}
+
 function getMailConfig() {
-  const from = env.mail.from;
-  const smtpHost = env.mail.smtpHost;
-  const smtpPort = env.mail.smtpPort;
-  const smtpSecure = env.mail.smtpSecure;
-  const smtpUser = env.mail.smtpUser;
-  const smtpPass = env.mail.smtpPass;
-  const resendApiKey = env.mail.resendApiKey;
-
-  if (smtpHost && smtpUser && smtpPass) {
+  if (!env.mail.resendApiKey) {
     return {
-      configured: true,
-      provider: "smtp",
-      from,
-      smtp: {
-        host: smtpHost,
-        port: Number.isFinite(smtpPort) ? smtpPort : 587,
-        secure: smtpSecure,
-        auth: { user: smtpUser, pass: smtpPass },
-      },
+      configured: false,
+      reason: "RESEND_API_KEY is not configured",
     };
   }
 
-  if (resendApiKey) {
-    return {
-      configured: true,
-      provider: "resend",
-      from,
-      resendApiKey,
-    };
-  }
-
-  return { configured: false };
+  return {
+    configured: true,
+    from: env.mail.from,
+  };
 }
 
 function maskEmail(email) {
@@ -71,38 +59,22 @@ async function sendMail({ email, content, successLabel, otp = null }) {
           label: successLabel.console,
           email,
           otp,
-          reason: "Email service is not configured",
+          reason: config.reason || "Email service is not configured",
         });
       } else {
         logConsoleMail({
           label: successLabel.console,
           email,
-          reason: "Email service is not configured",
+          reason: config.reason || "Email service is not configured",
         });
       }
       return true;
     }
 
-    throw new Error("Email service is not configured");
+    throw new Error(config.reason || "Email service is not configured");
   }
 
-  if (config.provider === "smtp") {
-    const transporter = nodemailer.createTransport(config.smtp);
-    await transporter.sendMail({
-      from: config.from,
-      to: email,
-      subject: content.subject,
-      text: content.text,
-      html: content.html,
-    });
-    console.log(
-      `[NestArrival SMTP] ${successLabel.sent} sent to ${maskEmail(email)}`,
-    );
-    return true;
-  }
-
-  const resend = new Resend(config.resendApiKey);
-  const { data, error } = await resend.emails.send({
+  const { data, error } = await getResendClient().emails.send({
     from: config.from,
     to: [email],
     subject: content.subject,

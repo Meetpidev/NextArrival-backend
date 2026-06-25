@@ -181,7 +181,6 @@ model Listing {
 
   @@index([status, createdAt, id])
   @@index([ownerId, status, createdAt, id])
-  @@index([city])
   @@index([status, rent, createdAt, id])
   @@index([status, bedrooms, bathrooms, createdAt, id])
 }

@@ -50,7 +50,13 @@ exports.getAnalytics = async (req, res) => {
       where: { user: { verificationStatus: "PENDING_VERIFICATION" } },
     });
 
-    res.json({ totalTenants, totalOwners, totalListings, totalRevenue, totalVerificationsPending });
+    res.json({
+      totalTenants,
+      totalOwners,
+      totalListings,
+      totalRevenue,
+      totalVerificationsPending,
+    });
   } catch (err) {
     return sendServerError(res, err, "Failed to fetch analytics");
   }
@@ -124,7 +130,11 @@ exports.processVerification = async (req, res) => {
 
 exports.getListings = async (req, res) => {
   try {
-    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    const requestedLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Math.min(
+      Math.max(Number.isNaN(requestedLimit) ? 50 : requestedLimit, 1),
+      100,
+    );
     const cursor =
       typeof req.query.cursor === "string" && req.query.cursor.trim()
         ? req.query.cursor.trim()
@@ -396,7 +406,9 @@ exports.moderateSubscription = async (req, res) => {
   try {
     const { subscriptionId, action } = req.body;
     if (!subscriptionId || !action) {
-      return res.status(400).json({ error: "Subscription ID and action are required" });
+      return res
+        .status(400)
+        .json({ error: "Subscription ID and action are required" });
     }
     if (!["APPROVE", "REJECT"].includes(action)) {
       return res.status(400).json({ error: "Invalid action" });
@@ -410,7 +422,9 @@ exports.moderateSubscription = async (req, res) => {
     }
 
     if (sub.status !== "PENDING") {
-      return res.status(400).json({ error: "Subscription is already processed" });
+      return res
+        .status(400)
+        .json({ error: "Subscription is already processed" });
     }
 
     const status = action === "APPROVE" ? "APPROVED" : "REJECTED";
@@ -425,7 +439,9 @@ exports.moderateSubscription = async (req, res) => {
         });
 
         const startDate = new Date();
-        const endDate = new Date(Date.now() + sub.durationDays * 24 * 60 * 60 * 1000);
+        const endDate = new Date(
+          Date.now() + sub.durationDays * 24 * 60 * 60 * 1000,
+        );
 
         await tx.subscription.update({
           where: { id: subscriptionId },
@@ -439,7 +455,11 @@ exports.moderateSubscription = async (req, res) => {
 
         // Check if urgent match addon was purchased
         const plan = SUBSCRIPTION_PLANS.find((p) => p.id === sub.planId);
-        const basePrice = plan ? (sub.isSubscription ? plan.priceSub : plan.priceOneTime) : sub.price;
+        const basePrice = plan
+          ? sub.isSubscription
+            ? plan.priceSub
+            : plan.priceOneTime
+          : sub.price;
         const hasUrgent = sub.price > basePrice;
 
         if (hasUrgent) {
@@ -456,7 +476,9 @@ exports.moderateSubscription = async (req, res) => {
       }
     });
 
-    res.json({ message: `Subscription ${action === "APPROVE" ? "approved" : "rejected"} successfully.` });
+    res.json({
+      message: `Subscription ${action === "APPROVE" ? "approved" : "rejected"} successfully.`,
+    });
   } catch (err) {
     return sendServerError(res, err, "Failed to moderate subscription");
   }
@@ -549,14 +571,18 @@ exports.updatePartnerRequestStatus = async (req, res) => {
 
     if (status === "ACCEPTED") {
       try {
-        const inserted = await googleSheetsService.addAcceptedPartnerToSheet(current);
+        const inserted =
+          await googleSheetsService.addAcceptedPartnerToSheet(current);
         if (!inserted) {
           console.error(
             `Accepted partner ${current.id} was saved in the database but not appended to Google Sheets`,
           );
         }
       } catch (sheetError) {
-        console.error("Failed to append accepted partner to Google Sheet:", sheetError);
+        console.error(
+          "Failed to append accepted partner to Google Sheet:",
+          sheetError,
+        );
       }
     }
 

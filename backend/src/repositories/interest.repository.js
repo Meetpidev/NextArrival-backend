@@ -152,7 +152,12 @@ function createInterestChatMessage(prisma, data) {
 
 function updateInterestStatus(prisma, { id, status, ownerMessage, expectedStatus = "PENDING" }) {
   return prisma.inquiry.update({
-    where: { id, status: expectedStatus },
+    where: {
+      id,
+      status: expectedStatus,
+      tenantDeletedAt: null,
+      ownerDeletedAt: null,
+    },
     data: {
       status,
       ownerMessage: ownerMessage || null,

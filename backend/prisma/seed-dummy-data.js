@@ -5,7 +5,12 @@ const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcryptjs");
 const { env } = require("../src/config/env");
 
-const connectionString = env.databaseUrl || "";
+const connectionString = env.databaseUrl;
+if (!connectionString) {
+  console.error("DATABASE_URL is not defined in backend .env");
+  process.exit(1);
+}
+
 let resolvedDbUrl = connectionString;
 if (connectionString.startsWith("prisma+postgres://")) {
   try {

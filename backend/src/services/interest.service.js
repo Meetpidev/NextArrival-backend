@@ -16,6 +16,22 @@ class InterestServiceError extends Error {
   }
 }
 
+
+async function runSerializableTransaction(callback, attempts = 3) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await prisma.$transaction(callback, {
+        isolationLevel: "Serializable",
+      });
+    } catch (error) {
+      if (error.code === "P2034" && attempt < attempts) {
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 function sanitizePlainText(value) {
   return String(value || "")
     .replace(/[<>"'&]/g, "")
@@ -170,18 +186,6 @@ async function createInterestRequest({ tenant, propertyId, message }) {
 
   const dayStart = new Date();
   dayStart.setHours(0, 0, 0, 0);
-  const requestsToday = await repo.countTenantRequestsSince(prisma, {
-    tenantId: tenant.id,
-    since: dayStart,
-  });
-
-  if (requestsToday >= DAILY_TENANT_INQUIRY_LIMIT) {
-    throw new InterestServiceError(
-      "DAILY_INQUIRY_LIMIT_REACHED",
-      "Daily inquiry limit reached. Please try again tomorrow.",
-      429,
-    );
-  }
 
   const profileSnapshot = buildProfileSnapshot(tenant);
   const propertySnapshot = buildPropertySnapshot(property);
@@ -195,7 +199,20 @@ async function createInterestRequest({ tenant, propertyId, message }) {
   }
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await runSerializableTransaction(async (tx) => {
+      const requestsToday = await repo.countTenantRequestsSince(tx, {
+        tenantId: tenant.id,
+        since: dayStart,
+      });
+
+      if (requestsToday >= DAILY_TENANT_INQUIRY_LIMIT) {
+        throw new InterestServiceError(
+          "DAILY_INQUIRY_LIMIT_REACHED",
+          "Daily inquiry limit reached. Please try again tomorrow.",
+          429,
+        );
+      }
+
       const updatedSub = await repo.incrementApproachUsage(
         tx,
         activeSub.id,
@@ -461,7 +478,7 @@ async function decideInterestRequest({
     );
   }
 
-  if (existing.ownerDeletedAt) {
+  if (existing.ownerDeletedAt || existing.tenantDeletedAt) {
     throw new InterestServiceError(
       "INTEREST_REQUEST_NOT_FOUND",
       "Interest request not found",
