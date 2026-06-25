@@ -120,7 +120,7 @@ exports.getListings = async (req, res) => {
         where: whereClause,
         include: {
           owner: {
-            select: { id: true, fullName: true, email: true, isVerified: true },
+            select: { id: true, fullName: true, isVerified: true },
           },
         },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -423,10 +423,10 @@ exports.archiveListing = async (req, res) => {
 exports.getSavedListings = async (req, res) => {
   try {
     const userId = req.user.id;
-    
+
     const list = await prisma.savedListing.findMany({
       where: {
-        userId: userId
+        userId: userId,
       },
       include: {
         listing: {
@@ -435,19 +435,19 @@ exports.getSavedListings = async (req, res) => {
               select: {
                 id: true,
                 fullName: true,
-                isVerified: true
-              }
-            }
-          }
-        }
-      }
+                isVerified: true,
+              },
+            },
+          },
+        },
+      },
     });
     // Filter out archived/non-approved listings in JS (Prisma does not support
     // where filters on to-one relation includes)
     res.json(
       list
         .filter((item) => item.listing && item.listing.status === "APPROVED")
-        .map((item) => item.listing)
+        .map((item) => item.listing),
     );
   } catch (err) {
     return sendServerError(
@@ -498,4 +498,3 @@ exports.toggleSaveListing = async (req, res) => {
     );
   }
 };
-

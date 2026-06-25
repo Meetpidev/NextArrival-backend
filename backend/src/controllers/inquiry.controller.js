@@ -2,7 +2,6 @@ const { childLogger } = require("../config/logger");
 const logger = childLogger("inquiry-controller");
 const { prisma } = require("../config/db");
 const { caches } = require("../config/cache");
-const crypto = require("crypto");
 const {
   contactUsSchema,
   partnerWithUsSchema,
@@ -80,38 +79,19 @@ exports.submitContactUs = async (req, res) => {
   try {
     const data = contactUsSchema.parse(req.body);
 
-    const contactRows = await prisma.$queryRaw`
-      INSERT INTO "ContactUs" (
-        "id",
-        "whoAreYou",
-        "fullName",
-        "email",
-        "phone",
-        "destinationCity",
-        "visaStatus",
-        "subject",
-        "messageDetail",
-        "status",
-        "createdAt",
-        "updatedAt"
-      ) VALUES (
-        ${crypto.randomUUID()},
-        ${data.whoAreYou},
-        ${data.fullName},
-        ${data.email},
-        ${data.phone},
-        ${nullableText(data.destinationCity)},
-        ${nullableText(data.visaStatus)},
-        ${data.subject},
-        ${data.messageDetail},
-        'PENDING',
-        NOW(),
-        NOW()
-      )
-      RETURNING "id", "createdAt"
-    `;
-
-    const contactUs = contactRows[0];
+    const contactUs = await prisma.contactUs.create({
+      data: {
+        whoAreYou: data.whoAreYou,
+        fullName: data.fullName,
+        email: data.email,
+        phone: data.phone,
+        destinationCity: nullableText(data.destinationCity),
+        visaStatus: nullableText(data.visaStatus),
+        subject: data.subject,
+        messageDetail: data.messageDetail,
+      },
+      select: { id: true, createdAt: true },
+    });
 
     await notifyAdminsOfInquiry({
       recordId: contactUs.id,

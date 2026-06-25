@@ -631,16 +631,6 @@ exports.forgotPassword = async (req, res) => {
     }
 
     const { otp, otpHash, otpExpiry } = createOtp();
-    logger.debug("Storing reset OTP details");
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        otp: otpHash,
-        otpExpiry,
-        otpAttempts: 0,
-        otpLastSentAt: new Date(),
-      },
-    });
 
     try {
       logger.debug("Dispatching reset OTP email");
@@ -652,6 +642,17 @@ exports.forgotPassword = async (req, res) => {
         error: "Verification email could not be sent. Please try again later.",
       });
     }
+
+    logger.debug("Storing reset OTP details");
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        otp: otpHash,
+        otpExpiry,
+        otpAttempts: 0,
+        otpLastSentAt: new Date(),
+      },
+    });
 
     res.json({
       message: "Reset OTP sent to your email.",

@@ -5,7 +5,6 @@
  * - Security headers (helmet)
  * - CORS + cookie support
  * - JSON parsing + rate limiting
- * - Static serving for uploaded files
  * - Route wiring under /api/*
  * - Central error handling for JSON + multer upload errors
  */
@@ -14,8 +13,6 @@ require("dotenv/config");
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
-const path = require("path");
-const fs = require("fs");
 const helmet = require("helmet");
 const { env } = require("./config/env");
 const multer = require("multer");
@@ -58,12 +55,6 @@ const corsOptions = {
   optionsSuccessStatus: 204,
 };
 
-// Ensure uploads directory exists before serving it
-const uploadDir = path.join(__dirname, "..", "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
 const app = express();
 
 if (env.requestLogging) {
@@ -105,8 +96,6 @@ app.options("*", cors(corsOptions));
 app.use(express.json({ limit: "10kb" })); // limit request body size
 app.use(cookieParser()); // parse Cookie header into req.cookies
 app.use(express.urlencoded({ extended: true, limit: "10kb" })); // parse URL-encoded bodies
-// Serve uploaded files (e.g. verification docs, listing photos)
-app.use("/uploads", express.static(uploadDir, { dotfiles: "deny" }));
 app.use("/test", (req, res) => {
   res.send(
     "Welcome to the backend API. Please use the /api endpoints for requests.",
