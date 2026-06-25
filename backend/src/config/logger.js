@@ -1,5 +1,4 @@
 const pino = require("pino");
-const pretty = require("pino-pretty");
 const { env } = require("./env");
 
 function serializeError(error) {
@@ -47,7 +46,7 @@ const baseOptions = {
 };
 
 const prettyStream = env.log.pretty
-  ? pretty({
+  ? require("pino-pretty")({
       colorize: true,
       translateTime: "SYS:yyyy-mm-dd HH:MM:ss.l",
       ignore: "pid,hostname,service,env",

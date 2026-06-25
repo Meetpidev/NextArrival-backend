@@ -1,7 +1,10 @@
 const { prisma } = require("../config/db");
+const { childLogger } = require("../config/logger");
 const repo = require("../repositories/notification.repository");
 const queueProvider = require("../providers/notificationQueue.provider");
 const firebaseProvider = require("../providers/firebase.provider");
+
+const logger = childLogger("notification-service");
 
 class NotificationServiceError extends Error {
   constructor(code, message, statusCode = 400) {
@@ -83,18 +86,12 @@ async function createAdminNotification(data, options = {}) {
   }
 
   if (options.enqueue !== false) {
-    const queuePromise = enqueueNotificationJob({
-      notificationIds: notifications.map((item) => item.id),
-      userIds: admins.map((adminUser) => adminUser.id),
-      title: data.title,
-      message: data.message,
-      type: data.type,
-      relatedId: data.relatedId || null,
-      relatedType: data.relatedType || null,
-    });
+    const queuePromises = notifications.map((notification) =>
+      enqueueNotificationJob(buildQueuePayload(notification)),
+    );
 
     if (options.awaitQueue === true) {
-      await queuePromise;
+      await Promise.all(queuePromises);
     }
   }
 

@@ -23,6 +23,8 @@ const compression = require("compression");
 const pinoHttp = require("pino-http");
 const { childLogger } = require("./config/logger");
 
+const logger = childLogger("app");
+
 // Rate limiter instances shared across route namespaces
 const {
   generalLimiter,
@@ -177,7 +179,7 @@ app.use((err, req, res, next) => {
     return res.status(400).json({ error: err.message });
   }
 
-  req.log?.error({ err }, "Unhandled request error");
+  (req.log || logger).error({ err }, "Unhandled request error");
   return res.status(500).json({ error: "Internal server error" });
 });
 

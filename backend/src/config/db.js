@@ -2,6 +2,9 @@ const { Pool } = require("pg");
 const { PrismaPg } = require("@prisma/adapter-pg");
 const { PrismaClient } = require("@prisma/client");
 const { env } = require("./env");
+const { childLogger } = require("./logger");
+
+const logger = childLogger("database");
 
 const connectionString = env.databaseUrl;
 

@@ -5,6 +5,9 @@ const {
   DeleteMessageCommand,
 } = require("@aws-sdk/client-sqs");
 const { env } = require("../config/env");
+const { childLogger } = require("../config/logger");
+
+const logger = childLogger("notification-queue-provider");
 
 let sqsClient;
 

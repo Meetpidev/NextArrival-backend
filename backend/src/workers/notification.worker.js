@@ -5,6 +5,9 @@ const {
   deleteNotificationJob,
 } = require("../providers/notificationQueue.provider");
 const { sendPushNotification } = require("../services/notification.service");
+const { childLogger } = require("../config/logger");
+
+const logger = childLogger("notification-worker");
 
 let shouldStop = false;
 

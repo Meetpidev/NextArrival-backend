@@ -1,5 +1,8 @@
 const admin = require("firebase-admin");
 const { getFirebaseServiceAccount } = require("../config/env");
+const { childLogger } = require("../config/logger");
+
+const logger = childLogger("firebase-provider");
 
 let initialized = false;
 

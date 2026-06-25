@@ -1,5 +1,8 @@
 const { Resend } = require("resend");
 const { env } = require("../config/env");
+const { childLogger } = require("../config/logger");
+
+const logger = childLogger("mail-service");
 
 const OTP_TTL_MINUTES = 15;
 

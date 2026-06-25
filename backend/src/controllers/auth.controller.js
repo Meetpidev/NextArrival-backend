@@ -3,7 +3,7 @@
  *
  * Implements:
  * - Email/password signup + OTP verification
- * - Login (password) + OTP flow for unverified accounts
+ * - Login (password) for verified accounts only
  * - Google login (OAuth2)
  * - Logout + current user session (/me)
  */
@@ -14,7 +14,11 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { OAuth2Client } = require("google-auth-library");
 const { env } = require("../config/env");
-const { sendVerificationOtp, sendPasswordResetOtp } = require("../services/mail.service");
+const { childLogger } = require("../config/logger");
+const {
+  sendVerificationOtp,
+  sendPasswordResetOtp,
+} = require("../services/mail.service");
 const { createOtp, hashOtp } = require("../utils/otp");
 const {
   signupSchema,
@@ -31,9 +35,12 @@ const {
   sendServerError,
 } = require("../utils/http");
 
+const logger = childLogger("auth-controller");
 const googleClient = new OAuth2Client(env.googleClientId);
 const JWT_COOKIE_NAME = "nestarrival_session";
 const ALLOWED_SELF_ROLES = ["TENANT", "OWNER"];
+const OTP_MAX_ATTEMPTS = 5;
+const OTP_RESEND_COOLDOWN_MS = 60_000;
 
 function createToken(user) {
   return jwt.sign(
@@ -49,6 +56,10 @@ function isValidRole(role) {
 
 function normalizeRole(role) {
   return isValidRole(role) ? String(role).toUpperCase() : "TENANT";
+}
+
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
 }
 
 function isOtpMatch(storedHash, otp) {
@@ -91,7 +102,7 @@ exports.signup = async (req, res) => {
     }
 
     const { email, password, fullName, role } = result.data;
-    const normalizedEmail = email.toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
 
     logger.debug("Checking for existing user during signup");
     const existingUser = await prisma.user.findUnique({
@@ -167,89 +178,86 @@ exports.login = async (req, res) => {
   logger.info("Login request received");
   try {
     const { email, password } = loginSchema.parse(req.body);
+    const normalizedEmail = normalizeEmail(email);
 
     logger.debug("Finding user by email during login");
     const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
+      where: { email: normalizedEmail },
     });
+
     if (!user) {
+      const pendingUser = await prisma.pendingUser.findUnique({
+        where: { email: normalizedEmail },
+      });
+
+      const pendingPasswordMatches = pendingUser
+        ? await bcrypt.compare(password, pendingUser.passwordHash)
+        : false;
+
+      if (pendingPasswordMatches) {
+        logger.info("Login blocked: email verification pending");
+        return res.status(403).json({
+          error: "Email verification required",
+          message: "Please verify your email before logging in.",
+          requiresEmailVerification: true,
+          email: normalizedEmail,
+        });
+      }
+
       logger.info("Login failed: user not found");
       return res.status(400).json({ error: "Invalid credentials" });
     }
+
     if (!user.passwordHash) {
       logger.info("Login failed: user has no password hash");
       return res.status(400).json({ error: "Invalid credentials" });
     }
+
     logger.debug("Comparing password hash");
     const match = await bcrypt.compare(password, user.passwordHash);
     if (!match) {
       logger.info("Login failed: password mismatch");
       return res.status(400).json({ error: "Invalid credentials" });
     }
+
     if (user.isBanned) {
       logger.info("Login failed: account is banned");
       return res.status(403).json({ error: "Account banned" });
     }
-    if (user.isVerified) {
-      logger.debug("Generating JWT session token");
-      const token = createToken(user);
-      setCookie(res, token);
 
-      logger.info({ userId: user.id }, "Login successful for verified user");
-      return res.json({
-        message: "Login successful",
-        user: {
-          id: user.id,
-          email: user.email,
-          fullName: user.fullName,
-          role: user.role,
-          isVerified: true,
-        },
+    if (!user.isVerified) {
+      logger.warn(
+        { userId: user.id },
+        "Login blocked for legacy unverified user row",
+      );
+      return res.status(403).json({
+        error: "Email verification required",
+        message: "This account must complete email verification before logging in.",
+        requiresEmailVerification: true,
+        email: normalizedEmail,
       });
     }
-    logger.info("Initializing login verification OTP flow");
-    if (
-      user.otpLastSentAt &&
-      Date.now() - new Date(user.otpLastSentAt).getTime() < 60_000
-    ) {
-      logger.info("OTP request throttled");
-      return res.status(429).json({
-        error: "Wait before requesting OTP again",
-      });
-    }
-    const { otp, otpHash, otpExpiry } = createOtp();
-    logger.debug("Updating user OTP details");
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        otp: otpHash,
-        otpExpiry,
-        otpAttempts: 0,
-        otpLastSentAt: new Date(),
-      },
-    });
-    try {
-      logger.debug("Dispatching verification OTP email");
-      await sendVerificationOtp(user.email, otp);
-      logger.info("OTP dispatched successfully");
-    } catch (mailError) {
-      logger.error({ err: mailError }, "Login OTP email dispatch failed");
-      return res.status(503).json({
-        error: "Verification email could not be sent. Please try again later.",
-      });
-    }
-    logger.info("OTP flow initiated");
+
+    logger.debug("Generating JWT session token");
+    const token = createToken(user);
+    setCookie(res, token);
+
+    logger.info({ userId: user.id }, "Login successful for verified user");
     return res.json({
-      message: "OTP sent for verification",
-      isVerified: false,
-      email: user.email,
+      message: "Login successful",
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        isVerified: true,
+      },
     });
   } catch (err) {
     logger.error({ err }, "Login error caught");
     if (isZodError(err)) {
       return sendValidationError(res, err);
     }
-    logger.error({ err }, "Login error");
     return res.status(400).json({ error: "Invalid credentials" });
   }
 };
@@ -272,9 +280,10 @@ exports.googleLogin = async (req, res) => {
     }
 
     const { email, name, sub: googleId } = payload;
+    const normalizedEmail = normalizeEmail(email);
 
     let user = await prisma.user.findFirst({
-      where: { OR: [{ googleId }, { email: email.toLowerCase() }] },
+      where: { OR: [{ googleId }, { email: normalizedEmail }] },
     });
 
     if (!user) {
@@ -285,7 +294,7 @@ exports.googleLogin = async (req, res) => {
 
       user = await prisma.user.create({
         data: {
-          email: email.toLowerCase(),
+          email: normalizedEmail,
           googleId,
           fullName: name,
           role: normalizedRole,
@@ -305,6 +314,10 @@ exports.googleLogin = async (req, res) => {
         });
       }
     }
+
+    await prisma.pendingUser.deleteMany({
+      where: { email: normalizedEmail },
+    });
 
     const token = createToken(user);
     setCookie(res, token);
@@ -333,136 +346,57 @@ exports.googleLogin = async (req, res) => {
 exports.verifyOtp = async (req, res) => {
   try {
     const { email, otp } = verifyOtpSchema.parse(req.body);
-    const normalizedEmail = email.toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
 
     const pendingUser = await prisma.pendingUser.findUnique({
       where: { email: normalizedEmail },
     });
 
-    if (pendingUser) {
-      if (new Date() > pendingUser.otpExpiry) {
-        return res.status(400).json({ error: "OTP expired" });
-      }
+    if (!pendingUser) {
+      return res.status(404).json({
+        error: "No pending email verification found",
+      });
+    }
 
-      if (pendingUser.otpAttempts >= 5) {
-        return res.status(429).json({ error: "Too many attempts" });
-      }
+    if (new Date() > pendingUser.otpExpiry) {
+      return res.status(400).json({ error: "OTP expired" });
+    }
 
-      if (!isOtpMatch(pendingUser.otp, otp)) {
-        await prisma.pendingUser.update({
-          where: { email: normalizedEmail },
-          data: { otpAttempts: pendingUser.otpAttempts + 1 },
-        });
-        return res.status(400).json({ error: "Invalid OTP" });
-      }
+    if (pendingUser.otpAttempts >= OTP_MAX_ATTEMPTS) {
+      return res.status(429).json({ error: "Too many attempts" });
+    }
 
-      const existingUser = await prisma.user.findUnique({
+    if (!isOtpMatch(pendingUser.otp, otp)) {
+      await prisma.pendingUser.update({
+        where: { email: normalizedEmail },
+        data: { otpAttempts: pendingUser.otpAttempts + 1 },
+      });
+      return res.status(400).json({ error: "Invalid OTP" });
+    }
+
+    const user = await prisma.$transaction(async (tx) => {
+      const stagedUser = await tx.pendingUser.delete({
         where: { email: normalizedEmail },
       });
 
-      if (existingUser) {
-        await prisma.pendingUser.delete({
-          where: { email: normalizedEmail },
-        });
-        return res.status(409).json({ error: "Email already registered" });
-      }
-
-      const user = await prisma.$transaction(async (tx) => {
-        const createdUser = await tx.user.create({
-          data: {
-            email: pendingUser.email,
-            passwordHash: pendingUser.passwordHash,
-            fullName: pendingUser.fullName,
-            role: pendingUser.role,
-            isVerified: true,
-            verificationStatus: "UNVERIFIED",
-          },
-        });
-
-        await tx.pendingUser.delete({
-          where: { email: normalizedEmail },
-        });
-
-        return createdUser;
-      });
-
-      const token = createToken(user);
-      setCookie(res, token);
-
-      return res.json({
-        message: "Account verified successfully",
-        user: serializeAuthUser(user),
-      });
-    }
-
-    // Fallback: Check standard DB-based verification (for legacy unverified users)
-    const user = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
-    });
-
-    if (!user) return res.status(400).json({ error: "User not found" });
-
-    if (user.isBanned) return res.status(403).json({ error: "Account banned" });
-
-    if (!user.otp || !user.otpExpiry)
-      return res.status(400).json({ error: "No OTP found" });
-
-    if (new Date() > user.otpExpiry)
-      return res.status(400).json({ error: "OTP expired" });
-
-    if (user.otpAttempts >= 5)
-      return res.status(429).json({ error: "Too many attempts" });
-
-    const hashedInput = hashOtp(otp);
-    const stored = Buffer.from(user.otp);
-    const input = Buffer.from(hashedInput);
-
-    if (stored.length !== input.length) {
-      await prisma.user.update({
-        where: { id: user.id },
+      return tx.user.create({
         data: {
-          otpAttempts: user.otpAttempts + 1,
+          email: stagedUser.email,
+          passwordHash: stagedUser.passwordHash,
+          fullName: stagedUser.fullName,
+          role: stagedUser.role,
+          isVerified: true,
+          verificationStatus: "UNVERIFIED",
         },
       });
-      return res.status(400).json({ error: "Invalid OTP" });
-    }
-
-    const isValid = crypto.timingSafeEqual(stored, input);
-
-    if (!isValid) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          otpAttempts: user.otpAttempts + 1,
-        },
-      });
-      return res.status(400).json({ error: "Invalid OTP" });
-    }
-
-    const updatedUser = await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        isVerified: true,
-        otp: null,
-        otpExpiry: null,
-        otpAttempts: 0,
-        verificationStatus: "UNVERIFIED",
-      },
     });
 
-    const token = createToken(updatedUser);
+    const token = createToken(user);
     setCookie(res, token);
 
-    res.json({
+    return res.status(201).json({
       message: "Account verified successfully",
-      user: {
-        id: updatedUser.id,
-        email: updatedUser.email,
-        fullName: updatedUser.fullName,
-        role: updatedUser.role,
-        isVerified: true,
-        verificationStatus: updatedUser.verificationStatus,
-      },
+      user: serializeAuthUser(user),
     });
   } catch (err) {
     if (isZodError(err)) {
@@ -471,73 +405,35 @@ exports.verifyOtp = async (req, res) => {
     if (err.code === "P2002") {
       return res.status(409).json({ error: "Email already registered" });
     }
+    if (err.code === "P2025") {
+      return res.status(404).json({
+        error: "No pending email verification found",
+      });
+    }
     logger.error({ err }, "OTP verification error");
-    res.status(400).json({ error: "Invalid OTP" });
+    return res.status(400).json({ error: "Invalid OTP" });
   }
 };
 
 exports.resendOtp = async (req, res) => {
   try {
     const { email } = resendOtpSchema.parse(req.body);
-    const normalizedEmail = email.toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
 
     const pendingUser = await prisma.pendingUser.findUnique({
       where: { email: normalizedEmail },
     });
 
-    if (pendingUser) {
-      if (
-        pendingUser.otpLastSentAt &&
-        Date.now() - new Date(pendingUser.otpLastSentAt).getTime() < 60_000
-      ) {
-        return res.status(429).json({
-          error: "Wait before requesting OTP again",
-        });
-      }
-
-      const { otp, otpHash, otpExpiry } = createOtp();
-      await prisma.pendingUser.update({
-        where: { email: normalizedEmail },
-        data: {
-          otp: otpHash,
-          otpExpiry,
-          otpAttempts: 0,
-          otpLastSentAt: new Date(),
-        },
-      });
-
-      try {
-        await sendVerificationOtp(normalizedEmail, otp);
-      } catch (mailError) {
-        logger.error({ err: mailError }, "Resend OTP email failed");
-        return res.status(503).json({
-          error: "Verification email could not be sent. Please try again later.",
-        });
-      }
-
-      return res.json({
-        message: "OTP resent successfully",
-        email: normalizedEmail,
+    if (!pendingUser) {
+      return res.status(404).json({
+        error: "No pending email verification found",
       });
     }
 
-    // Fallback: DB-based resend
-    const user = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-    if (user.isBanned) {
-      return res.status(403).json({ error: "Account banned" });
-    }
-    if (user.isVerified) {
-      return res.status(400).json({ error: "Account is already verified" });
-    }
     if (
-      user.otpLastSentAt &&
-      Date.now() - new Date(user.otpLastSentAt).getTime() < 60_000
+      pendingUser.otpLastSentAt &&
+      Date.now() - new Date(pendingUser.otpLastSentAt).getTime() <
+        OTP_RESEND_COOLDOWN_MS
     ) {
       return res.status(429).json({
         error: "Wait before requesting OTP again",
@@ -545,8 +441,8 @@ exports.resendOtp = async (req, res) => {
     }
 
     const { otp, otpHash, otpExpiry } = createOtp();
-    await prisma.user.update({
-      where: { id: user.id },
+    await prisma.pendingUser.update({
+      where: { email: normalizedEmail },
       data: {
         otp: otpHash,
         otpExpiry,
@@ -617,7 +513,7 @@ exports.forgotPassword = async (req, res) => {
   logger.info("Forgot password request received");
   try {
     const { email } = forgotPasswordSchema.parse(req.body);
-    const normalizedEmail = email.toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
 
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
@@ -673,7 +569,7 @@ exports.resetPassword = async (req, res) => {
   logger.info("Reset password request received");
   try {
     const { email, otp, newPassword } = resetPasswordSchema.parse(req.body);
-    const normalizedEmail = email.toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
 
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
@@ -695,7 +591,7 @@ exports.resetPassword = async (req, res) => {
       return res.status(400).json({ error: "Reset code expired" });
     }
 
-    if (user.otpAttempts >= 5) {
+    if (user.otpAttempts >= OTP_MAX_ATTEMPTS) {
       return res.status(429).json({ error: "Too many attempts. Please try again." });
     }
 

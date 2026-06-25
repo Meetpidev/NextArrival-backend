@@ -1,4 +1,7 @@
 const { ZodError } = require("zod");
+const { childLogger } = require("../config/logger");
+
+const logger = childLogger("http-utils");
 
 function formatZodIssues(error) {
   // Zod v4 uses issues; keep errors as a fallback for older call sites.

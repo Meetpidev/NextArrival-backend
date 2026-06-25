@@ -11,6 +11,9 @@ const { prisma } = require("../config/db");
 const jwt = require("jsonwebtoken");
 const { env } = require("../config/env");
 const { createNotification } = require("../services/notification.service");
+const { childLogger } = require("../config/logger");
+
+const logger = childLogger("chat-socket");
 
 // Minimal cookie parser for Socket.IO handshake headers.
 function parseCookies(cookieHeader) {

@@ -1,10 +1,12 @@
 const { prisma } = require("../config/db");
+const { childLogger } = require("../config/logger");
 const repo = require("../repositories/interest.repository");
 const {
   createNotification,
   enqueueNotificationJob,
 } = require("./notification.service");
 
+const logger = childLogger("interest-service");
 const DAILY_TENANT_INQUIRY_LIMIT = 10;
 
 class InterestServiceError extends Error {
