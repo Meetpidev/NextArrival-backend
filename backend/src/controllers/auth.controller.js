@@ -364,7 +364,7 @@ exports.verifyOtp = async (req, res) => {
       if (!isOtpMatch(pendingUser.otp, otp)) {
         await prisma.pendingUser.update({
           where: { email: normalizedEmail },
-          data: { otpAttempts: pendingUser.otpAttempts + 1 },
+          data: { otpAttempts: { increment: 1 } },
         });
         return res.status(400).json({ error: "Invalid OTP" });
       }
@@ -426,7 +426,7 @@ exports.verifyOtp = async (req, res) => {
     if (!isOtpMatch(legacyUser.otp, otp)) {
       await prisma.user.update({
         where: { id: legacyUser.id },
-        data: { otpAttempts: legacyUser.otpAttempts + 1 },
+        data: { otpAttempts: { increment: 1 } },
       });
       return res.status(400).json({ error: "Invalid OTP" });
     }
@@ -488,6 +488,15 @@ exports.resendOtp = async (req, res) => {
 
       const { otp, otpHash, otpExpiry } = createOtp();
 
+      await prisma.pendingUser.update({
+        where: { email: normalizedEmail },
+        data: {
+          otp: otpHash,
+          otpExpiry,
+          otpAttempts: 0,
+        },
+      });
+
       try {
         await sendVerificationOtp(normalizedEmail, otp);
       } catch (mailError) {
@@ -499,12 +508,7 @@ exports.resendOtp = async (req, res) => {
 
       await prisma.pendingUser.update({
         where: { email: normalizedEmail },
-        data: {
-          otp: otpHash,
-          otpExpiry,
-          otpAttempts: 0,
-          otpLastSentAt: new Date(),
-        },
+        data: { otpLastSentAt: new Date() },
       });
 
       return res.json({
@@ -543,6 +547,15 @@ exports.resendOtp = async (req, res) => {
 
     const { otp, otpHash, otpExpiry } = createOtp();
 
+    await prisma.user.update({
+      where: { id: legacyUser.id },
+      data: {
+        otp: otpHash,
+        otpExpiry,
+        otpAttempts: 0,
+      },
+    });
+
     try {
       await sendVerificationOtp(normalizedEmail, otp);
     } catch (mailError) {
@@ -554,12 +567,7 @@ exports.resendOtp = async (req, res) => {
 
     await prisma.user.update({
       where: { id: legacyUser.id },
-      data: {
-        otp: otpHash,
-        otpExpiry,
-        otpAttempts: 0,
-        otpLastSentAt: new Date(),
-      },
+      data: { otpLastSentAt: new Date() },
     });
 
     return res.json({
@@ -632,6 +640,16 @@ exports.forgotPassword = async (req, res) => {
 
     const { otp, otpHash, otpExpiry } = createOtp();
 
+    logger.debug("Storing reset OTP details");
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        otp: otpHash,
+        otpExpiry,
+        otpAttempts: 0,
+      },
+    });
+
     try {
       logger.debug("Dispatching reset OTP email");
       await sendPasswordResetOtp(normalizedEmail, otp);
@@ -643,15 +661,9 @@ exports.forgotPassword = async (req, res) => {
       });
     }
 
-    logger.debug("Storing reset OTP details");
     await prisma.user.update({
       where: { id: user.id },
-      data: {
-        otp: otpHash,
-        otpExpiry,
-        otpAttempts: 0,
-        otpLastSentAt: new Date(),
-      },
+      data: { otpLastSentAt: new Date() },
     });
 
     res.json({
@@ -705,7 +717,7 @@ exports.resetPassword = async (req, res) => {
       await prisma.user.update({
         where: { id: user.id },
         data: {
-          otpAttempts: user.otpAttempts + 1,
+          otpAttempts: { increment: 1 },
         },
       });
       return res.status(400).json({ error: "Invalid OTP code" });
@@ -717,7 +729,7 @@ exports.resetPassword = async (req, res) => {
       await prisma.user.update({
         where: { id: user.id },
         data: {
-          otpAttempts: user.otpAttempts + 1,
+          otpAttempts: { increment: 1 },
         },
       });
       return res.status(400).json({ error: "Invalid OTP code" });

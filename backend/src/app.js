@@ -152,7 +152,7 @@ app.use((err, req, res, next) => {
 
   if (err instanceof multer.MulterError) {
     const multerMessages = {
-      LIMIT_FILE_SIZE: "Uploaded file must not exceed 2MB",
+      LIMIT_FILE_SIZE: "Uploaded file must not exceed 5MB",
       LIMIT_UNEXPECTED_FILE: "Upload field must be named file",
       LIMIT_PART_COUNT: "Too many upload parts",
       LIMIT_FILE_COUNT: "Only one file can be uploaded at a time",

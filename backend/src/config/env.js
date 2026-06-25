@@ -138,6 +138,13 @@ const env = {
     sessionToken: text("AWS_SESSION_TOKEN"),
     notificationQueueUrl:
       text("NOTIFICATION_QUEUE_URL") || text("AWS_SQS_QUEUE_URL"),
+    s3: {
+      bucket: text("AWS_S3_BUCKET") || text("S3_BUCKET"),
+      endpoint: text("AWS_S3_ENDPOINT") || text("S3_ENDPOINT"),
+      prefix: text("AWS_S3_PREFIX", "verification"),
+      forcePathStyle: bool("AWS_S3_FORCE_PATH_STYLE", false),
+      serverSideEncryption: text("AWS_S3_SERVER_SIDE_ENCRYPTION", "AES256"),
+    },
   },
 };
 

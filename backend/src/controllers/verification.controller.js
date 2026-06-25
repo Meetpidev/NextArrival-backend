@@ -2,17 +2,22 @@
  * Verification controller
  *
  * Handles:
- * - uploading verification documents
+ * - uploading verification documents to private S3 storage
  * - serving authenticated verification documents
  * - submitting verification details + documents metadata
  */
 
-const fs = require("fs");
-const path = require("path");
 const { prisma } = require("../config/db");
 const { sendServerError } = require("../utils/http");
+const {
+  StorageServiceError,
+  uploadPrivateObject,
+  getPrivateObject,
+  decodeObjectKey,
+  objectOwnerIdFromKey,
+  streamToReadable,
+} = require("../services/storage.service");
 
-const uploadDir = path.resolve(__dirname, "..", "..", "uploads");
 const verificationFilePrefix = "/api/verification/files/";
 
 function normalizeDocumentUrl(value) {
@@ -21,12 +26,13 @@ function normalizeDocumentUrl(value) {
     return null;
   }
 
-  const filename = path.basename(url.slice(verificationFilePrefix.length));
-  if (!filename || filename !== url.slice(verificationFilePrefix.length)) {
+  const fileRef = url.slice(verificationFilePrefix.length);
+  const key = decodeObjectKey(fileRef);
+  if (!key) {
     return null;
   }
 
-  return `${verificationFilePrefix}${filename}`;
+  return `${verificationFilePrefix}${fileRef}`;
 }
 
 function hasExpectedFileSignature(buffer, mimetype) {
@@ -47,57 +53,77 @@ function hasExpectedFileSignature(buffer, mimetype) {
   return false;
 }
 
-async function validateUploadedFile(file) {
-  const handle = await fs.promises.open(file.path, "r");
-  try {
-    const buffer = Buffer.alloc(8);
-    await handle.read(buffer, 0, buffer.length, 0);
-    return hasExpectedFileSignature(buffer, file.mimetype);
-  } finally {
-    await handle.close();
-  }
+function validateUploadedFile(file) {
+  return Boolean(
+    file &&
+      Buffer.isBuffer(file.buffer) &&
+      file.buffer.length > 0 &&
+      hasExpectedFileSignature(file.buffer, file.mimetype),
+  );
 }
-function canAccessUploadedFile(user, filename) {
-  return user.role === "ADMIN" || filename.startsWith(`${user.id}_`);
+
+function canAccessObject(user, key) {
+  return user.role === "ADMIN" || objectOwnerIdFromKey(key) === user.id;
 }
 
 exports.uploadFile = async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: "No file uploaded" });
-  }
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
 
-  if (!(await validateUploadedFile(req.file))) {
-    await fs.promises.unlink(req.file.path).catch(() => {});
-    return res.status(400).json({ error: "Uploaded file content is invalid" });
-  }
+    if (!validateUploadedFile(req.file)) {
+      return res.status(400).json({ error: "Uploaded file content is invalid" });
+    }
 
-  res.json({
-    message: "File uploaded successfully",
-    url: `${verificationFilePrefix}${req.file.filename}`,
-  });
+    const uploaded = await uploadPrivateObject({
+      buffer: req.file.buffer,
+      contentType: req.file.mimetype,
+      originalName: req.file.originalname,
+      ownerId: req.user.id,
+      category: "verification",
+    });
+
+    return res.json({
+      message: "File uploaded successfully",
+      url: `${verificationFilePrefix}${uploaded.ref}`,
+    });
+  } catch (err) {
+    if (err instanceof StorageServiceError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    return sendServerError(res, err, "Failed to upload file");
+  }
 };
 
 exports.getUploadedFile = async (req, res) => {
-  const filename = path.basename(String(req.params.filename || ""));
-  if (!filename || filename !== req.params.filename) {
-    return res.status(400).json({ error: "Invalid file name" });
-  }
+  try {
+    const key = decodeObjectKey(req.params.fileRef);
+    if (!key) {
+      return res.status(400).json({ error: "Invalid file reference" });
+    }
 
-  if (!canAccessUploadedFile(req.user, filename)) {
-    return res.status(403).json({ error: "File not available" });
-  }
+    if (!canAccessObject(req.user, key)) {
+      return res.status(403).json({ error: "File not available" });
+    }
 
-  const filePath = path.join(uploadDir, filename);
-  const resolvedPath = path.resolve(filePath);
-  if (!resolvedPath.startsWith(`${uploadDir}${path.sep}`)) {
-    return res.status(400).json({ error: "Invalid file path" });
-  }
+    const object = await getPrivateObject(key);
+    res.setHeader("Content-Type", object.contentType);
+    if (object.contentLength !== undefined) {
+      res.setHeader("Content-Length", String(object.contentLength));
+    }
+    res.setHeader("Cache-Control", "private, max-age=60");
 
-  if (!fs.existsSync(resolvedPath)) {
-    return res.status(404).json({ error: "File not found" });
+    return streamToReadable(object.stream).pipe(res);
+  } catch (err) {
+    if (err?.$metadata?.httpStatusCode === 404 || err?.name === "NoSuchKey") {
+      return res.status(404).json({ error: "File not found" });
+    }
+    if (err instanceof StorageServiceError) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    return sendServerError(res, err, "Failed to fetch file");
   }
-
-  return res.sendFile(resolvedPath);
 };
 
 exports.submitVerification = async (req, res) => {
@@ -200,7 +226,7 @@ exports.submitVerification = async (req, res) => {
       }),
     ]);
 
-    res.json({ message: "Verification request submitted successfully" });
+    return res.json({ message: "Verification request submitted successfully" });
   } catch (err) {
     return sendServerError(res, err, "Failed to submit verification request");
   }
