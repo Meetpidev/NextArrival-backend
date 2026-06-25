@@ -15,22 +15,42 @@ const { env } = require("../config/env");
 const { sendServerError } = require("../utils/http");
 const JWT_COOKIE_NAME = "nestarrival_session";
 
+function parseCursorPagination(query, defaultLimit = 20, maxLimit = 100) {
+  const pageSize = Math.min(
+    Math.max(Number(query.limit) || defaultLimit, 1),
+    maxLimit,
+  );
+
+  return {
+    cursor:
+      typeof query.cursor === "string" && query.cursor.trim()
+        ? query.cursor.trim()
+        : null,
+    pageSize,
+  };
+}
+
+function buildCursorPage(items, pageSize) {
+  const hasNextPage = items.length > pageSize;
+  const pageItems = hasNextPage ? items.slice(0, pageSize) : items;
+
+  return {
+    items: pageItems,
+    pageInfo: {
+      limit: pageSize,
+      hasNextPage,
+      nextCursor: hasNextPage
+        ? (pageItems[pageItems.length - 1]?.id ?? null)
+        : null,
+    },
+  };
+}
+
 exports.getListings = async (req, res) => {
   try {
-    const {
-      scope,
-      city,
-      minRent,
-      maxRent,
-      bedrooms,
-      bathrooms,
-      page = 1,
-      limit = 20,
-    } = req.query;
+    const { scope, city, minRent, maxRent, bedrooms, bathrooms } = req.query;
 
-    const pageNumber = Math.max(Number(page) || 1, 1);
-    const pageSize = Math.min(Math.max(Number(limit) || 20, 1), 100);
-    const skip = (pageNumber - 1) * pageSize;
+    const { cursor, pageSize } = parseCursorPagination(req.query);
 
     const whereClause = {};
 
@@ -93,23 +113,26 @@ exports.getListings = async (req, res) => {
       }
     }
 
-    const [total, listings] = await Promise.all([
-      prisma.listing.count({ where: whereClause }),
-      prisma.listing.findMany({
-        where: whereClause,
-        include: {
-          owner: {
-            select: { id: true, fullName: true, email: true, isVerified: true },
-          },
+    const listings = await prisma.listing.findMany({
+      where: whereClause,
+      include: {
+        owner: {
+          select: { id: true, fullName: true, email: true, isVerified: true },
         },
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: pageSize,
-      }),
-    ]);
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: pageSize + 1,
+    });
 
-    res.json({ total, page: pageNumber, limit: pageSize, listings });
+    const page = buildCursorPage(listings, pageSize);
+
+    res.json({ listings: page.items, pageInfo: page.pageInfo });
   } catch (err) {
+    if (err.code === "P2025") {
+      return res.status(400).json({ error: "Invalid listing cursor" });
+    }
+
     return sendServerError(
       res,
       "Listings fetch error: " + err.message,

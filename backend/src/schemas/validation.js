@@ -86,7 +86,7 @@ const listingsQuerySchema = z.object({
   maxRent: z.coerce.number().positive().optional(),
   bedrooms: z.coerce.number().int().positive().optional(),
   bathrooms: z.coerce.number().int().positive().optional(),
-  page: z.coerce.number().int().min(1).optional().default(1),
+  cursor: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
 });
 

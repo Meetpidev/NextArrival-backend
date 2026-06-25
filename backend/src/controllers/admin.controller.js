@@ -124,25 +124,40 @@ exports.processVerification = async (req, res) => {
 
 exports.getListings = async (req, res) => {
   try {
-    const page = Math.max(Number(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
-    const skip = (page - 1) * limit;
+    const cursor =
+      typeof req.query.cursor === "string" && req.query.cursor.trim()
+        ? req.query.cursor.trim()
+        : null;
 
-    const [total, listings] = await Promise.all([
-      prisma.listing.count({ where: { status: { not: "ARCHIVED" } } }),
-      prisma.listing.findMany({
-        where: { status: { not: "ARCHIVED" } },
-        include: {
-          owner: { select: { id: true, fullName: true, email: true } },
-        },
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
-      }),
-    ]);
+    const listings = await prisma.listing.findMany({
+      where: { status: { not: "ARCHIVED" } },
+      include: {
+        owner: { select: { id: true, fullName: true, email: true } },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: limit + 1,
+    });
 
-    res.json({ total, page, limit, listings });
+    const hasNextPage = listings.length > limit;
+    const pageItems = hasNextPage ? listings.slice(0, limit) : listings;
+
+    res.json({
+      listings: pageItems,
+      pageInfo: {
+        limit,
+        hasNextPage,
+        nextCursor: hasNextPage
+          ? (pageItems[pageItems.length - 1]?.id ?? null)
+          : null,
+      },
+    });
   } catch (err) {
+    if (err.code === "P2025") {
+      return res.status(400).json({ error: "Invalid listing cursor" });
+    }
+
     return sendServerError(res, err, "Failed to fetch listings");
   }
 };

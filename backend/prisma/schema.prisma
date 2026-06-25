@@ -179,11 +179,11 @@ model Listing {
   chatRooms  ChatRoom[]
   inquiries  Inquiry[]
 
-  @@index([status, createdAt])
-  @@index([ownerId, status, createdAt])
+  @@index([status, createdAt, id])
+  @@index([ownerId, status, createdAt, id])
   @@index([city])
-  @@index([rent])
-  @@index([bedrooms, bathrooms])
+  @@index([status, rent, createdAt, id])
+  @@index([status, bedrooms, bathrooms, createdAt, id])
 }
 
 model SavedListing {
