@@ -661,10 +661,17 @@ exports.forgotPassword = async (req, res) => {
       });
     }
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { otpLastSentAt: new Date() },
-    });
+    try {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { otpLastSentAt: new Date() },
+      });
+    } catch (timestampError) {
+      logger.warn(
+        { err: timestampError, userId: user.id },
+        "Password reset OTP sent but timestamp update failed",
+      );
+    }
 
     res.json({
       message: "Reset OTP sent to your email.",
