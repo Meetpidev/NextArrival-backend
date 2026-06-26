@@ -1,6 +1,7 @@
 const http = require("http");
 require("dotenv/config");
 const { env, validateRequiredEnv } = require("./src/config/env");
+const { logger } = require("./src/config/logger");
 
 validateRequiredEnv();
 
@@ -17,4 +18,3 @@ const PORT = env.port;
 server.listen(PORT, () => {
   logger.info({ port: PORT }, "Server running");
 });
-
