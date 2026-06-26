@@ -45,13 +45,16 @@ function assertS3Configured() {
 function getS3Client() {
   assertS3Configured();
   if (!s3Client) {
-    const credentials = env.aws.accessKeyId && env.aws.secretAccessKey
-      ? {
-          accessKeyId: env.aws.accessKeyId,
-          secretAccessKey: env.aws.secretAccessKey,
-          ...(env.aws.sessionToken ? { sessionToken: env.aws.sessionToken } : {}),
-        }
-      : undefined;
+    const credentials =
+      env.aws.accessKeyId && env.aws.secretAccessKey
+        ? {
+            accessKeyId: env.aws.accessKeyId,
+            secretAccessKey: env.aws.secretAccessKey,
+            ...(env.aws.sessionToken
+              ? { sessionToken: env.aws.sessionToken }
+              : {}),
+          }
+        : undefined;
 
     s3Client = new S3Client({
       region: env.aws.region,
@@ -91,7 +94,12 @@ function encodeObjectKey(key) {
 function decodeObjectKey(ref) {
   try {
     const key = Buffer.from(String(ref || ""), "base64url").toString("utf8");
-    if (!key || key.includes("..") || key.startsWith("/") || key.includes("\\")) {
+    if (
+      !key ||
+      key.includes("..") ||
+      key.startsWith("/") ||
+      key.includes("\\")
+    ) {
       return null;
     }
     return key;
@@ -105,7 +113,13 @@ function objectOwnerIdFromKey(key) {
   return parts.length >= 3 ? parts[1] : null;
 }
 
-async function uploadPrivateObject({ buffer, contentType, originalName, ownerId, category }) {
+async function uploadPrivateObject({
+  buffer,
+  contentType,
+  originalName,
+  ownerId,
+  category,
+}) {
   assertS3Configured();
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     throw new StorageServiceError("EMPTY_FILE", "Upload file is empty", 400);
@@ -126,7 +140,12 @@ async function uploadPrivateObject({ buffer, contentType, originalName, ownerId,
     }),
   );
 
-  logger.info({ key, ownerId }, "Uploaded private object to S3");
+  const keyHash = require("crypto")
+    .createHash("sha256")
+    .update(key)
+    .digest("hex")
+    .slice(0, 12);
+  logger.info({ keyHash, ownerId }, "Uploaded private object to S3");
   return { key, ref: encodeObjectKey(key) };
 }
 
@@ -181,3 +200,4 @@ module.exports = {
   objectOwnerIdFromKey,
   streamToReadable,
 };
+

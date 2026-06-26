@@ -32,7 +32,9 @@ function resolveDatabaseUrl(connectionString) {
   }
 }
 
-const pool = new Pool({ connectionString: resolveDatabaseUrl(env.databaseUrl) });
+const pool = new Pool({
+  connectionString: resolveDatabaseUrl(env.databaseUrl),
+});
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
@@ -377,26 +379,35 @@ async function seedFeatureScenario(passwordHash) {
       },
     ],
   });
+  async function main() {
+    if (
+      process.env.NODE_ENV === "production" &&
+      process.env.ALLOW_DUMMY_DATA_SEED !== "true"
+    ) {
+      throw new Error("Refusing to seed dummy data in production");
+    }
+
+    logger.info("Seeding dummy data started");
+
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash("NestArrivalTest2026!", salt);
+
+    await seedWarmProfiles(passwordHash);
+    await seedFeatureScenario(passwordHash);
+    await seedWarmProfiles(passwordHash);
+    await seedFeatureScenario(passwordHash);
+
+    logger.info("Seeding dummy data completed");
+  }
+
+  main()
+    .catch((err) => {
+      logger.error({ err }, "Error seeding dummy data");
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+      await pool.end();
+    });
 }
 
-async function main() {
-  logger.info("Seeding dummy data started");
-
-  const salt = await bcrypt.genSalt(10);
-  const passwordHash = await bcrypt.hash("NestArrivalTest2026!", salt);
-
-  await seedWarmProfiles(passwordHash);
-  await seedFeatureScenario(passwordHash);
-
-  logger.info("Seeding dummy data completed");
-}
-
-main()
-  .catch((err) => {
-    logger.error({ err }, "Error seeding dummy data");
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-    await pool.end();
-  });

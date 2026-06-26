@@ -7,12 +7,14 @@
  * - submitting verification details + documents metadata
  */
 
+const { pipeline } = require("stream/promises");
 const { prisma } = require("../config/db");
 const { sendServerError } = require("../utils/http");
 const {
   StorageServiceError,
   uploadPrivateObject,
   getPrivateObject,
+  getPrivateObjectMetadata,
   decodeObjectKey,
   objectOwnerIdFromKey,
   streamToReadable,
@@ -20,7 +22,7 @@ const {
 
 const verificationFilePrefix = "/api/verification/files/";
 
-function normalizeDocumentUrl(value) {
+async function normalizeDocumentUrl(value, user) {
   const url = String(value || "").trim();
   if (!url.startsWith(verificationFilePrefix)) {
     return null;
@@ -29,6 +31,21 @@ function normalizeDocumentUrl(value) {
   const fileRef = url.slice(verificationFilePrefix.length);
   const key = decodeObjectKey(fileRef);
   if (!key) {
+    return null;
+  }
+
+  if (objectOwnerIdFromKey(key) !== user.id) {
+    return null;
+  }
+
+  try {
+    const metadata = await getPrivateObjectMetadata(key);
+    const metadataOwnerId =
+      metadata?.Metadata?.ownerid || metadata?.Metadata?.ownerId;
+    if (metadataOwnerId && metadataOwnerId !== user.id) {
+      return null;
+    }
+  } catch {
     return null;
   }
 
@@ -114,8 +131,13 @@ exports.getUploadedFile = async (req, res) => {
     }
     res.setHeader("Cache-Control", "private, max-age=60");
 
-    return streamToReadable(object.stream).pipe(res);
+    await pipeline(streamToReadable(object.stream), res);
+    return undefined;
   } catch (err) {
+    if (res.headersSent) {
+      res.destroy(err);
+      return undefined;
+    }
     if (err?.$metadata?.httpStatusCode === 404 || err?.name === "NoSuchKey") {
       return res.status(404).json({ error: "File not found" });
     }
@@ -155,9 +177,11 @@ exports.submitVerification = async (req, res) => {
       : typeof documentUrls === "string"
         ? [documentUrls]
         : [];
-    const normalizedDocumentUrls = rawDocumentUrls
-      .map(normalizeDocumentUrl)
-      .filter(Boolean);
+    const normalizedDocumentUrls = (
+      await Promise.all(
+        rawDocumentUrls.map((url) => normalizeDocumentUrl(url, req.user)),
+      )
+    ).filter(Boolean);
 
     if (normalizedDocumentUrls.length !== rawDocumentUrls.length) {
       return res.status(400).json({
