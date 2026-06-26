@@ -499,6 +499,20 @@ async function seedSubscriptionsAndRefunds(users) {
     status: "ACTIVE",
   });
 
+  const arjunActive = await findOrCreateSubscription(tenantArjun.id, {
+    planId: "plan-starter-active",
+    name: "Starter Active",
+    price: 49,
+    durationDays: 30,
+    isSubscription: false,
+    approachesAllowed: 10,
+    approachesUsed: 1,
+    startDate: daysAgo(1),
+    endDate: daysFromNow(29),
+    isActive: true,
+    status: "ACTIVE",
+  });
+
   const pending = await findOrCreateSubscription(tenantArjun.id, {
     planId: "plan-basic-30",
     name: "Basic 30 Days",
@@ -511,6 +525,20 @@ async function seedSubscriptionsAndRefunds(users) {
     endDate: daysFromNow(30),
     isActive: false,
     status: "PENDING",
+  });
+
+  const mariaActive = await findOrCreateSubscription(tenantMaria.id, {
+    planId: "plan-worker-active",
+    name: "Worker Active",
+    price: 79,
+    durationDays: 30,
+    isSubscription: false,
+    approachesAllowed: 12,
+    approachesUsed: 1,
+    startDate: daysAgo(3),
+    endDate: daysFromNow(27),
+    isActive: true,
+    status: "ACTIVE",
   });
 
   const cancelled = await findOrCreateSubscription(tenantMaria.id, {
@@ -535,7 +563,7 @@ async function seedSubscriptionsAndRefunds(users) {
     adminNotes: null,
   });
 
-  return { active, pending, cancelled };
+  return { active, arjunActive, mariaActive, pending, cancelled };
 }
 
 async function seedVerification(users) {
