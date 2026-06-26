@@ -86,7 +86,7 @@ const listingsQuerySchema = z.object({
   maxRent: z.coerce.number().positive().optional(),
   bedrooms: z.coerce.number().int().positive().optional(),
   bathrooms: z.coerce.number().int().positive().optional(),
-  page: z.coerce.number().int().min(1).optional().default(1),
+  cursor: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
 });
 
@@ -138,20 +138,41 @@ const initiateChatSchema = z.object({
   firstMessage: z
     .string()
     .min(1, "Message content is required")
-    .max(2000, "Message must not exceed 2000 characters"),
+    .max(1000, "Message must not exceed 1000 characters"),
 });
 
 const createInterestRequestSchema = z.object({
-  propertyId: z.string().min(1, "Property ID is required"),
+  propertyId: z.string().min(1, "Property ID is required").optional(),
+  listingId: z.string().min(1, "Listing ID is required").optional(),
   message: z
     .string()
     .trim()
-    .max(2000, "Message must not exceed 2000 characters")
-    .optional(),
+    .min(1, "Message is required")
+    .max(1000, "Message must not exceed 1000 characters"),
+}).refine((data) => data.propertyId || data.listingId, {
+  message: "Property ID or listing ID is required",
+  path: ["propertyId"],
 });
 
 const interestRequestIdParamSchema = z.object({
   id: z.string().min(1, "Interest request ID is required"),
+});
+
+const respondInterestRequestSchema = z.object({
+  action: z.enum(["ACCEPT", "DECLINE"]),
+  message: z
+    .string()
+    .trim()
+    .max(1000, "Message must not exceed 1000 characters")
+    .optional(),
+});
+
+const ownerInterestMessageSchema = z.object({
+  message: z
+    .string()
+    .trim()
+    .max(1000, "Message must not exceed 1000 characters")
+    .optional(),
 });
 
 const interestPendingQuerySchema = z.object({
@@ -380,6 +401,8 @@ module.exports = {
   initiateChatSchema,
   createInterestRequestSchema,
   interestRequestIdParamSchema,
+  respondInterestRequestSchema,
+  ownerInterestMessageSchema,
   interestPendingQuerySchema,
   notificationQuerySchema,
   notificationIdParamSchema,
@@ -408,3 +431,5 @@ module.exports = {
   // Middleware wrapper
   validateSchema,
 };
+
+

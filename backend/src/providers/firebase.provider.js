@@ -1,42 +1,25 @@
 const admin = require("firebase-admin");
+const { getFirebaseServiceAccount } = require("../config/env");
+const { childLogger } = require("../config/logger");
+
+const logger = childLogger("firebase-provider");
 
 let initialized = false;
 
 function parseServiceAccount() {
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    try {
-      return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-    } catch (err) {
-      console.error(
-        "[Firebase] Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:",
-        err.message,
-      );
-      return null;
-    }
+  try {
+    return getFirebaseServiceAccount();
+  } catch (err) {
+    logger.error({ err }, "Invalid Firebase credential configuration");
+    return null;
   }
-
-  if (
-    process.env.FIREBASE_PROJECT_ID &&
-    process.env.FIREBASE_CLIENT_EMAIL &&
-    process.env.FIREBASE_PRIVATE_KEY
-  ) {
-    return {
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-    };
-  }
-
-  return null;
 }
 
 function getFirebaseMessaging() {
   if (!initialized) {
     const serviceAccount = parseServiceAccount();
     if (!serviceAccount) {
-      console.warn(
-        "[Firebase] Firebase credentials are not configured. Push skipped.",
-      );
+      logger.warn("Firebase credentials are not configured. Push skipped");
       return null;
     }
 
@@ -47,10 +30,7 @@ function getFirebaseMessaging() {
         });
       }
     } catch (err) {
-      console.error(
-        "[Firebase] Failed to initialize Firebase Admin:",
-        err.message,
-      );
+      logger.error({ err }, "Failed to initialize Firebase Admin");
       return null;
     }
     initialized = true;
@@ -61,7 +41,7 @@ function getFirebaseMessaging() {
 
 async function sendPushNotification({ tokens, title, message, data = {} }) {
   if (!Array.isArray(tokens)) {
-    console.error("[Firebase] Invalid tokens parameter: expected array");
+    logger.error("Invalid tokens parameter: expected array");
     return { successCount: 0, failureCount: 0, invalidTokens: [] };
   }
   if (!tokens.length) {
@@ -72,8 +52,9 @@ async function sendPushNotification({ tokens, title, message, data = {} }) {
   if (!messaging) {
     return { successCount: 0, failureCount: 0, invalidTokens: [] };
   }
+  let response;
   try {
-    const response = await messaging.sendEachForMulticast({
+    response = await messaging.sendEachForMulticast({
       tokens,
       notification: {
         title,
@@ -87,7 +68,7 @@ async function sendPushNotification({ tokens, title, message, data = {} }) {
       }, {}),
     });
   } catch (err) {
-    console.error("[Firebase] Failed to send push notification:", err.message);
+    logger.error({ err }, "Failed to send push notification");
     return { successCount: 0, failureCount: 0, invalidTokens: [] };
   }
 
@@ -103,7 +84,6 @@ async function sendPushNotification({ tokens, title, message, data = {} }) {
       invalidTokens.push(tokens[index]);
     }
   });
-
   return {
     successCount: response.successCount,
     failureCount: response.failureCount,

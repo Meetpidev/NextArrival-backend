@@ -9,7 +9,11 @@
 
 const { prisma } = require("../config/db");
 const jwt = require("jsonwebtoken");
+const { env } = require("../config/env");
 const { createNotification } = require("../services/notification.service");
+const { childLogger } = require("../config/logger");
+
+const logger = childLogger("chat-socket");
 
 // Minimal cookie parser for Socket.IO handshake headers.
 function parseCookies(cookieHeader) {
@@ -35,7 +39,7 @@ function initChatSocket(io) {
         return next(new Error("Unauthorized"));
       }
 
-      const payload = jwt.verify(token, process.env.JWT_SECRET);
+      const payload = jwt.verify(token, env.jwtSecret);
       const user = await prisma.user.findUnique({
         where: { id: payload.userId },
       });
@@ -65,7 +69,7 @@ function initChatSocket(io) {
 
         socket.join(roomId);
       } catch (err) {
-        console.error("Error joining room:", err);
+        logger.error({ err, roomId }, "Error joining room");
       }
     });
 
@@ -103,12 +107,12 @@ function initChatSocket(io) {
           relatedId: room.id,
           relatedType: "ChatRoom",
         }).catch((err) => {
-          console.error("Socket chat notification failed:", err);
+          logger.error({ err, roomId, receiverId }, "Socket chat notification failed");
         });
 
         io.to(roomId).emit("message", msg);
       } catch (err) {
-        console.error("Error sending message:", err.message);
+        logger.error({ err, roomId }, "Error sending message");
         socket.emit("error", { message: "Failed to send message" });
       }
     });
@@ -116,3 +120,4 @@ function initChatSocket(io) {
 }
 
 module.exports = { initChatSocket };
+

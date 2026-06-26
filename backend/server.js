@@ -1,6 +1,7 @@
 const http = require("http");
 require("dotenv/config");
-const { validateRequiredEnv } = require("./src/config/env");
+const { env, validateRequiredEnv } = require("./src/config/env");
+const { logger } = require("./src/config/logger");
 
 validateRequiredEnv();
 
@@ -12,8 +13,8 @@ const server = http.createServer(app);
 
 initSocket(server);
 
-const PORT = process.env.PORT || 5000;
+const PORT = env.port;
 
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  logger.info({ port: PORT }, "Server running");
 });

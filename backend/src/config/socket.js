@@ -1,12 +1,8 @@
 const { Server } = require("socket.io");
 const { initChatSocket } = require("../sockets/chat.socket");
+const { env } = require("./env");
 
-const DEFAULT_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"];
-const envOrigins = (process.env.CORS_ORIGINS || "")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-const allowedOrigins = Array.from(new Set([...DEFAULT_ORIGINS, ...envOrigins]));
+const allowedOrigins = env.corsOrigins;
 
 let io;
 
@@ -26,3 +22,4 @@ function getIO() {
 }
 
 module.exports = { initSocket, getIO };
+

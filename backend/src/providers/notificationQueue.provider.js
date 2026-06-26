@@ -4,17 +4,29 @@ const {
   ReceiveMessageCommand,
   DeleteMessageCommand,
 } = require("@aws-sdk/client-sqs");
+const { env } = require("../config/env");
+const { childLogger } = require("../config/logger");
+
+const logger = childLogger("notification-queue-provider");
 
 let sqsClient;
 
 function getQueueUrl() {
-  return process.env.NOTIFICATION_QUEUE_URL || process.env.AWS_SQS_QUEUE_URL;
+  return env.aws.notificationQueueUrl;
 }
 
 function getSqsClient() {
   if (!sqsClient) {
+    const credentials = env.aws.accessKeyId && env.aws.secretAccessKey
+      ? {
+          accessKeyId: env.aws.accessKeyId,
+          secretAccessKey: env.aws.secretAccessKey,
+        }
+      : undefined;
+
     sqsClient = new SQSClient({
-      region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION,
+      region: env.aws.region,
+      ...(credentials ? { credentials } : {}),
     });
   }
   return sqsClient;
@@ -23,7 +35,7 @@ function getSqsClient() {
 async function enqueueNotificationJob(payload) {
   const queueUrl = getQueueUrl();
   if (!queueUrl) {
-    console.warn("[NotificationQueue] Queue URL is not configured. Skipping enqueue.");
+    logger.warn("Queue URL is not configured. Skipping enqueue");
     return { queued: false, reason: "QUEUE_URL_NOT_CONFIGURED" };
   }
 
@@ -40,7 +52,7 @@ async function enqueueNotificationJob(payload) {
 async function receiveNotificationJobs() {
   const queueUrl = getQueueUrl();
   if (!queueUrl) {
-    console.warn("[NotificationQueue] Queue URL is not configured. Skipping receive.");
+    logger.warn("Queue URL is not configured. Skipping receive");
     return [];
   }
 
@@ -59,7 +71,7 @@ async function receiveNotificationJobs() {
 async function deleteNotificationJob(receiptHandle) {
   const queueUrl = getQueueUrl();
   if (!queueUrl) {
-    console.warn("[NotificationQueue] Queue URL is not configured. Skipping delete.");
+    logger.warn("Queue URL is not configured. Skipping delete");
     return { deleted: false, reason: "QUEUE_URL_NOT_CONFIGURED" };
   }
 

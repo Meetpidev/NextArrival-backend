@@ -1,3 +1,5 @@
+const { childLogger } = require("../config/logger");
+const logger = childLogger("notification-controller");
 const {
   notificationQuerySchema,
   notificationIdParamSchema,
@@ -23,7 +25,7 @@ function sendNotificationError(res, err) {
     });
   }
 
-  console.error("Notification API error:", err);
+  logger.error({ err }, "Notification API error");
   return res.status(500).json({
     success: false,
     error: "Unable to process notification request",

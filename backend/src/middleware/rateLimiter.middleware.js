@@ -1,10 +1,11 @@
 const rateLimit = require("express-rate-limit");
+const { env } = require("../config/env");
 
 const DEFAULT_WINDOW_MS = 15 * 60 * 1000;
 const DEFAULT_MESSAGE = "Too many requests, try again later.";
 
 const createLimiter = (options = {}) => {
-  if (process.env.NODE_ENV !== "production") {
+  if (!env.isProduction) {
     return (req, res, next) => next();
   }
   return rateLimit({
@@ -18,7 +19,7 @@ const createLimiter = (options = {}) => {
 };
 
 const generalLimiter = createLimiter({
-  max: parseInt(process.env.RATE_LIMIT_API_MAX, 10) || 2000,
+  max: env.rateLimit.apiMax,
   handler: (req, res) =>
     res.status(429).json({
       status: "fail",
@@ -27,9 +28,9 @@ const generalLimiter = createLimiter({
 });
 
 const authLimiter = createLimiter({
-  max: parseInt(process.env.RATE_LIMIT_AUTH_MAX, 10) || 200,
+  max: env.rateLimit.authMax,
   windowMs:
-    parseInt(process.env.RATE_LIMIT_AUTH_WINDOW_MS, 10) || DEFAULT_WINDOW_MS,
+    env.rateLimit.authWindowMs,
   skipFailedRequests: false,
   handler: (req, res) =>
     res.status(429).json({
@@ -39,7 +40,7 @@ const authLimiter = createLimiter({
 });
 
 const publicLimiter = createLimiter({
-  max: parseInt(process.env.RATE_LIMIT_PUBLIC_MAX, 10) || 3000,
+  max: env.rateLimit.publicMax,
   skipFailedRequests: true,
   handler: (req, res) =>
     res.status(429).json({
@@ -49,7 +50,7 @@ const publicLimiter = createLimiter({
 });
 
 const adminLimiter = createLimiter({
-  max: parseInt(process.env.RATE_LIMIT_ADMIN_MAX, 10) || 1000,
+  max: env.rateLimit.adminMax,
   handler: (req, res) =>
     res.status(429).json({
       status: "fail",
@@ -63,3 +64,4 @@ module.exports = {
   publicLimiter,
   adminLimiter,
 };
+

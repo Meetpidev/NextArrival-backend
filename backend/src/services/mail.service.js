@@ -1,42 +1,33 @@
-const nodemailer = require("nodemailer");
 const { Resend } = require("resend");
+const { env } = require("../config/env");
+const { childLogger } = require("../config/logger");
 
-const DEFAULT_FROM = "NestArrival <no-reply@nestarrival.ca>";
+const logger = childLogger("mail-service");
+
 const OTP_TTL_MINUTES = 15;
 
+let resendClient = null;
+
+function getResendClient() {
+  if (!resendClient) {
+    resendClient = new Resend(env.mail.resendApiKey);
+  }
+
+  return resendClient;
+}
+
 function getMailConfig() {
-  const from = process.env.MAIL_FROM || process.env.RESEND_FROM || DEFAULT_FROM;
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpPort = Number(process.env.SMTP_PORT || 587);
-  const smtpSecure = process.env.SMTP_SECURE === "true";
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASS;
-  const resendApiKey = process.env.RESEND_API_KEY;
-
-  if (smtpHost && smtpUser && smtpPass) {
+  if (!env.mail.resendApiKey) {
     return {
-      configured: true,
-      provider: "smtp",
-      from,
-      smtp: {
-        host: smtpHost,
-        port: Number.isFinite(smtpPort) ? smtpPort : 587,
-        secure: smtpSecure,
-        auth: { user: smtpUser, pass: smtpPass },
-      },
+      configured: false,
+      reason: "RESEND_API_KEY is not configured",
     };
   }
 
-  if (resendApiKey) {
-    return {
-      configured: true,
-      provider: "resend",
-      from,
-      resendApiKey,
-    };
-  }
-
-  return { configured: false };
+  return {
+    configured: true,
+    from: env.mail.from,
+  };
 }
 
 function maskEmail(email) {
@@ -45,62 +36,45 @@ function maskEmail(email) {
 }
 
 function logConsoleOtp({ label, email, otp, reason }) {
-  console.log(`\n==================================================`);
-  console.log(label);
-  console.log(`To: ${email}`);
-  console.log(`OTP Code: ${otp}`);
-  console.log(`Status: ${reason}. Printed for local testing.`);
-  console.log(`==================================================\n`);
+  logger.warn(
+    { label, email, otpCode: otp, reason },
+    "Email delivery is using console OTP fallback",
+  );
 }
 
 function logConsoleMail({ label, email, reason }) {
-  console.log(`\n==================================================`);
-  console.log(label);
-  console.log(`To: ${email}`);
-  console.log(`Status: ${reason}. Printed for local testing.`);
-  console.log(`==================================================\n`);
+  logger.warn(
+    { label, email, reason },
+    "Email delivery is using console fallback",
+  );
 }
 
 async function sendMail({ email, content, successLabel, otp = null }) {
   const config = getMailConfig();
 
   if (!config.configured) {
-    if (process.env.ALLOW_CONSOLE_OTP === "true") {
+    if (env.mail.allowConsoleOtp) {
       if (otp) {
         logConsoleOtp({
           label: successLabel.console,
           email,
           otp,
-          reason: "Email service is not configured",
+          reason: config.reason || "Email service is not configured",
         });
       } else {
         logConsoleMail({
           label: successLabel.console,
           email,
-          reason: "Email service is not configured",
+          reason: config.reason || "Email service is not configured",
         });
       }
       return true;
     }
 
-    throw new Error("Email service is not configured");
+    throw new Error(config.reason || "Email service is not configured");
   }
 
-  if (config.provider === "smtp") {
-    const transporter = nodemailer.createTransport(config.smtp);
-    await transporter.sendMail({
-      from: config.from,
-      to: email,
-      subject: content.subject,
-      text: content.text,
-      html: content.html,
-    });
-    console.log(`[NestArrival SMTP] ${successLabel.sent} sent to ${maskEmail(email)}`);
-    return true;
-  }
-
-  const resend = new Resend(config.resendApiKey);
-  const { data, error } = await resend.emails.send({
+  const { data, error } = await getResendClient().emails.send({
     from: config.from,
     to: [email],
     subject: content.subject,
@@ -112,11 +86,7 @@ async function sendMail({ email, content, successLabel, otp = null }) {
     throw new Error(error.message || "Resend email dispatch failed");
   }
 
-  console.log(
-    `[NestArrival Resend] ${successLabel.sent} sent to ${maskEmail(email)}${
-      data?.id ? ` (${data.id})` : ""
-    }`,
-  );
+  logger.info({ email, provider: "resend", messageId: data?.id }, `${successLabel.sent} sent`);
   return true;
 }
 
@@ -245,9 +215,8 @@ function buildPartnerDecisionEmail({ organizationName, fullName, status }) {
                       <p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#334155;">${
                         accepted
                           ? "Our partnerships team reviewed your submission and would like to move ahead with the next steps. We will be in touch shortly to coordinate a formal discussion."
-                          : "Our partnerships team reviewed your submission and, at this time, we will not be moving forward.<br>we will not be moving forward with your partnership request. <br> Thank you for sharing"
-                      }</p>
-                      <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#475569;">Organization: <strong>${organizationName || "N/A"}</strong></p>
+                          : "Our partnerships team reviewed your submission and, at this time, we will not be moving forward with your partnership request. Thank you for your interest."
+                      }</p>                      <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#475569;">Organization: <strong>${organizationName || "N/A"}</strong></p>
                       <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">Let us know in case of any further questions.</p>
                     </td>
                   </tr>

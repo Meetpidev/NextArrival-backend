@@ -1,9 +1,13 @@
 const { prisma } = require("../config/db");
+const { childLogger } = require("../config/logger");
 const repo = require("../repositories/interest.repository");
 const {
   createNotification,
   enqueueNotificationJob,
 } = require("./notification.service");
+
+const logger = childLogger("interest-service");
+const DAILY_TENANT_INQUIRY_LIMIT = 10;
 
 class InterestServiceError extends Error {
   constructor(code, message, statusCode = 400) {
@@ -14,6 +18,28 @@ class InterestServiceError extends Error {
   }
 }
 
+
+async function runSerializableTransaction(callback, attempts = 3) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await prisma.$transaction(callback, {
+        isolationLevel: "Serializable",
+      });
+    } catch (error) {
+      if (error.code === "P2034" && attempt < attempts) {
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+function sanitizePlainText(value) {
+  return String(value || "")
+    .replace(/[<>"'&]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 function buildProfileSnapshot(tenant) {
   return {
     tenantId: tenant.id,
@@ -50,7 +76,11 @@ function buildPropertySnapshot(property) {
   };
 }
 
-function buildInterestMessageContent(profileSnapshot, propertySnapshot, message) {
+function buildInterestMessageContent(
+  profileSnapshot,
+  propertySnapshot,
+  message,
+) {
   const lines = [
     `${profileSnapshot.tenantName || "A verified tenant"} is interested in ${propertySnapshot.title}.`,
     `Verification status: ${profileSnapshot.verificationStatus}.`,
@@ -60,11 +90,27 @@ function buildInterestMessageContent(profileSnapshot, propertySnapshot, message)
     lines.push(`Country of origin: ${profileSnapshot.countryOfOrigin}.`);
   }
 
-  if (message) {
-    lines.push(`Message: ${message}`);
-  }
+  lines.push(`Message: ${message}`);
 
   return lines.join("\n");
+}
+
+function enqueueInterestNotification(notification, userIds, logLabel) {
+  try {
+    void enqueueNotificationJob({
+      notificationId: notification.id,
+      userIds,
+      title: notification.title,
+      message: notification.message,
+      type: notification.type,
+      relatedId: notification.relatedId,
+      relatedType: notification.relatedType,
+    }).catch((enqueueError) => {
+      logger.error({ err: enqueueError, action: logLabel }, "Failed to enqueue notification after inquiry action");
+    });
+  } catch (enqueueError) {
+    logger.error({ err: enqueueError, action: logLabel }, "Failed to enqueue notification after inquiry action");
+  }
 }
 
 async function createInterestRequest({ tenant, propertyId, message }) {
@@ -98,7 +144,11 @@ async function createInterestRequest({ tenant, propertyId, message }) {
 
   const property = await repo.findPropertyById(prisma, propertyId);
   if (!property) {
-    throw new InterestServiceError("PROPERTY_NOT_FOUND", "Property not found", 404);
+    throw new InterestServiceError(
+      "PROPERTY_NOT_FOUND",
+      "Property not found",
+      404,
+    );
   }
 
   if (property.ownerId === tenant.id) {
@@ -117,25 +167,48 @@ async function createInterestRequest({ tenant, propertyId, message }) {
     );
   }
 
-  const existingPending = await repo.findPendingByTenantAndProperty(
+  const existingInquiry = await repo.findActiveByTenantAndProperty(
     prisma,
     tenant.id,
     propertyId,
   );
-  if (existingPending) {
+  if (existingInquiry) {
     throw new InterestServiceError(
-      "PENDING_INTEREST_EXISTS",
-      "A pending interest request already exists for this property",
+      "INQUIRY_EXISTS",
+      "An active inquiry already exists for this property",
       409,
     );
   }
 
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+
   const profileSnapshot = buildProfileSnapshot(tenant);
   const propertySnapshot = buildPropertySnapshot(property);
-  const trimmedMessage = typeof message === "string" ? message.trim() : "";
+  const trimmedMessage = sanitizePlainText(message);
+  if (!trimmedMessage) {
+    throw new InterestServiceError(
+      "MESSAGE_REQUIRED",
+      "Message is required",
+      400,
+    );
+  }
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await runSerializableTransaction(async (tx) => {
+      const requestsToday = await repo.countTenantRequestsSince(tx, {
+        tenantId: tenant.id,
+        since: dayStart,
+      });
+
+      if (requestsToday >= DAILY_TENANT_INQUIRY_LIMIT) {
+        throw new InterestServiceError(
+          "DAILY_INQUIRY_LIMIT_REACHED",
+          "Daily inquiry limit reached. Please try again tomorrow.",
+          429,
+        );
+      }
+
       const updatedSub = await repo.incrementApproachUsage(
         tx,
         activeSub.id,
@@ -154,71 +227,48 @@ async function createInterestRequest({ tenant, propertyId, message }) {
         tenantId: tenant.id,
         ownerId: property.ownerId,
         propertyId: property.id,
+        tenantMessage: trimmedMessage,
         profileSnapshot,
         propertySnapshot,
       });
 
-      const chatRoom = await repo.findOrCreateChatRoom(tx, {
-        tenantId: tenant.id,
-        ownerId: property.ownerId,
-        listingId: property.id,
-      });
-
-      const chatMessage = await repo.createInterestChatMessage(tx, {
-        roomId: chatRoom.id,
-        senderId: tenant.id,
-        content: buildInterestMessageContent(
-          profileSnapshot,
-          propertySnapshot,
-          trimmedMessage,
-        ),
-        messageType: "INTEREST_REQUEST",
+      await repo.createInquiryAuditLog(tx, {
+        inquiryId: interestRequest.id,
+        actorId: tenant.id,
+        actorRole: tenant.role,
+        action: "CREATED",
         metadata: {
-          interestRequestId: interestRequest.id,
-          tenant: profileSnapshot,
-          property: propertySnapshot,
-          message: trimmedMessage || null,
+          propertyId: property.id,
+          ownerId: property.ownerId,
         },
       });
 
       const notification = await createNotification(
         {
           userId: property.ownerId,
-          title: "New tenant interest request",
-          message: `${profileSnapshot.tenantName || "A verified tenant"} is interested in ${propertySnapshot.title}.`,
-          type: "INTEREST_REQUEST",
+          title: "New tenant inquiry",
+          message: `${profileSnapshot.tenantName || "A verified tenant"} sent an inquiry for ${propertySnapshot.title}.`,
+          type: "INQUIRY_CREATED",
           relatedId: interestRequest.id,
-          relatedType: "InterestRequest",
+          relatedType: "Inquiry",
         },
         { prisma: tx, enqueue: false },
       );
 
-      return { interestRequest, chatRoom, chatMessage, notification };
+      return { interestRequest, notification };
     });
 
-    try {
-      void enqueueNotificationJob({
-        notificationId: result.notification.id,
-        userIds: [property.ownerId],
-        title: result.notification.title,
-        message: result.notification.message,
-        type: result.notification.type,
-        relatedId: result.notification.relatedId,
-        relatedType: result.notification.relatedType,
-      }).catch((enqueueError) => {
-        console.error(
-          "Failed to enqueue notification after interest request creation:",
-          enqueueError,
-        );
-      });
-    } catch (enqueueError) {
-      console.error(
-        "Failed to enqueue notification after interest request creation:",
-        enqueueError,
-      );
-    }
+    enqueueInterestNotification(
+      result.notification,
+      [property.ownerId],
+      "interest request creation",
+    );
 
-    return result;
+    return {
+      interestRequest: result.interestRequest,
+      chatRoom: null,
+      chatMessage: null,
+    };
   } catch (error) {
     if (error instanceof InterestServiceError) {
       throw error;
@@ -226,11 +276,13 @@ async function createInterestRequest({ tenant, propertyId, message }) {
 
     if (
       error.code === "P2002" ||
-      String(error.message || "").includes("interest_requests_pending_unique_idx")
+      String(error.message || "").includes(
+        "inquiries_tenant_property_unique_idx",
+      )
     ) {
       throw new InterestServiceError(
-        "PENDING_INTEREST_EXISTS",
-        "A pending interest request already exists for this property",
+        "INQUIRY_EXISTS",
+        "An active inquiry already exists for this property",
         409,
       );
     }
@@ -265,20 +317,135 @@ async function getPendingInterestRequests({ owner, page, limit }) {
   };
 }
 
-function buildDecisionMessage(status, interestRequest) {
+async function getInterestRequest({ user, interestRequestId }) {
+  const interestRequest = await repo.findInterestRequestById(
+    prisma,
+    interestRequestId,
+  );
+  if (!interestRequest) {
+    throw new InterestServiceError(
+      "INTEREST_REQUEST_NOT_FOUND",
+      "Interest request not found",
+      404,
+    );
+  }
+
+  if (
+    interestRequest.tenantId !== user.id &&
+    interestRequest.ownerId !== user.id
+  ) {
+    throw new InterestServiceError(
+      "FORBIDDEN",
+      "You cannot view this inquiry",
+      403,
+    );
+  }
+
+  if (
+    (interestRequest.tenantId === user.id && interestRequest.tenantDeletedAt) ||
+    (interestRequest.ownerId === user.id && interestRequest.ownerDeletedAt)
+  ) {
+    throw new InterestServiceError(
+      "INTEREST_REQUEST_NOT_FOUND",
+      "Interest request not found",
+      404,
+    );
+  }
+
+  return interestRequest;
+}
+
+async function deleteInterestRequestHistory({ user, interestRequestId }) {
+  const interestRequest = await repo.findInterestRequestById(
+    prisma,
+    interestRequestId,
+  );
+  if (!interestRequest) {
+    throw new InterestServiceError(
+      "INTEREST_REQUEST_NOT_FOUND",
+      "Interest request not found",
+      404,
+    );
+  }
+
+  if (
+    interestRequest.tenantId !== user.id &&
+    interestRequest.ownerId !== user.id
+  ) {
+    throw new InterestServiceError(
+      "FORBIDDEN",
+      "You cannot delete this inquiry",
+      403,
+    );
+  }
+
+  const participantRole =
+    interestRequest.tenantId === user.id ? "TENANT" : "OWNER";
+  const result = await prisma.$transaction(async (tx) => {
+    const updateResult = await repo.markDeletedForParticipant(tx, {
+      id: interestRequestId,
+      userId: user.id,
+      role: participantRole,
+    });
+
+    if (updateResult.count === 0) {
+      throw new InterestServiceError(
+        "INTEREST_REQUEST_NOT_FOUND",
+        "Interest request not found",
+        404,
+      );
+    }
+
+    await repo.createInquiryAuditLog(tx, {
+      inquiryId: interestRequestId,
+      actorId: user.id,
+      actorRole: user.role,
+      action: "DELETED_FROM_HISTORY",
+      metadata: { deletedFor: participantRole },
+    });
+
+    return updateResult;
+  });
+
+  if (result.count === 0) {
+    throw new InterestServiceError(
+      "INTEREST_REQUEST_NOT_FOUND",
+      "Interest request not found",
+      404,
+    );
+  }
+
+  return { deleted: true };
+}
+
+function buildDecisionMessage(status, interestRequest, ownerMessage) {
   const propertyName =
     interestRequest.propertySnapshot?.title ||
     interestRequest.property?.title ||
     "the property";
 
   if (status === "ACCEPTED") {
-    return `Your inquiry for ${propertyName} has been accepted.`;
+    const lines = [
+      `Great news! The owner of ${propertyName} would like to talk with you.`,
+    ];
+
+    if (ownerMessage) {
+      lines.push(`They said: ${ownerMessage}`);
+    }
+
+    lines.push("You can now message them directly.");
+    return lines.join(" ");
   }
 
-  return `Your inquiry for ${propertyName} has been rejected.`;
+  return `Thank you for your interest in ${propertyName}. Unfortunately, the owner is not available to discuss at this time. We hope you find the perfect property!`;
 }
 
-async function decideInterestRequest({ owner, interestRequestId, status }) {
+async function decideInterestRequest({
+  owner,
+  interestRequestId,
+  status,
+  ownerMessage,
+}) {
   if (owner.role !== "OWNER") {
     throw new InterestServiceError(
       "ROLE_NOT_ALLOWED",
@@ -287,7 +454,10 @@ async function decideInterestRequest({ owner, interestRequestId, status }) {
     );
   }
 
-  const existing = await repo.findInterestRequestById(prisma, interestRequestId);
+  const existing = await repo.findInterestRequestById(
+    prisma,
+    interestRequestId,
+  );
   if (!existing) {
     throw new InterestServiceError(
       "INTEREST_REQUEST_NOT_FOUND",
@@ -304,32 +474,75 @@ async function decideInterestRequest({ owner, interestRequestId, status }) {
     );
   }
 
+  if (existing.ownerDeletedAt || existing.tenantDeletedAt) {
+    throw new InterestServiceError(
+      "INTEREST_REQUEST_NOT_FOUND",
+      "Interest request not found",
+      404,
+    );
+  }
+
+  const trimmedOwnerMessage =
+    typeof ownerMessage === "string" ? sanitizePlainText(ownerMessage) : "";
   let result;
+
   try {
     result = await prisma.$transaction(async (tx) => {
       const interestRequest = await repo.updateInterestStatus(tx, {
         id: interestRequestId,
         status,
+        ownerMessage: trimmedOwnerMessage || null,
         expectedStatus: "PENDING",
       });
 
-      const chatRoom = await repo.findOrCreateChatRoom(tx, {
-        tenantId: interestRequest.tenantId,
-        ownerId: interestRequest.ownerId,
-        listingId: interestRequest.propertyId,
-      });
+      let chatRoom = null;
+      const chatMessages = [];
 
-      const chatMessage = await repo.createInterestChatMessage(tx, {
-        roomId: chatRoom.id,
-        senderId: owner.id,
-        content: buildDecisionMessage(status, interestRequest),
-        messageType: "TEXT",
-        metadata: {
-          automated: true,
-          interestRequestId: interestRequest.id,
-          action: status,
-        },
-      });
+      if (status === "ACCEPTED") {
+        chatRoom = await repo.findOrCreateChatRoom(tx, {
+          tenantId: interestRequest.tenantId,
+          ownerId: interestRequest.ownerId,
+          listingId: interestRequest.propertyId,
+        });
+
+        chatMessages.push(
+          await repo.createInterestChatMessage(tx, {
+            roomId: chatRoom.id,
+            senderId: interestRequest.tenantId,
+            content: buildInterestMessageContent(
+              interestRequest.profileSnapshot,
+              interestRequest.propertySnapshot,
+              interestRequest.tenantMessage,
+            ),
+            messageType: "INTEREST_REQUEST",
+            metadata: {
+              interestRequestId: interestRequest.id,
+              tenant: interestRequest.profileSnapshot,
+              property: interestRequest.propertySnapshot,
+              message: interestRequest.tenantMessage,
+            },
+          }),
+        );
+
+        chatMessages.push(
+          await repo.createInterestChatMessage(tx, {
+            roomId: chatRoom.id,
+            senderId: owner.id,
+            content: buildDecisionMessage(
+              status,
+              interestRequest,
+              trimmedOwnerMessage,
+            ),
+            messageType: "TEXT",
+            metadata: {
+              automated: true,
+              interestRequestId: interestRequest.id,
+              action: status,
+              ownerMessage: trimmedOwnerMessage || null,
+            },
+          }),
+        );
+      }
 
       const notificationType =
         status === "ACCEPTED" ? "INQUIRY_ACCEPTED" : "INQUIRY_REJECTED";
@@ -337,16 +550,32 @@ async function decideInterestRequest({ owner, interestRequestId, status }) {
         {
           userId: interestRequest.tenantId,
           title:
-            status === "ACCEPTED" ? "Inquiry accepted" : "Inquiry rejected",
-          message: buildDecisionMessage(status, interestRequest),
+            status === "ACCEPTED" ? "Inquiry accepted" : "Inquiry declined",
+          message: buildDecisionMessage(
+            status,
+            interestRequest,
+            trimmedOwnerMessage,
+          ),
           type: notificationType,
           relatedId: interestRequest.id,
-          relatedType: "InterestRequest",
+          relatedType: "Inquiry",
         },
         { prisma: tx, enqueue: false },
       );
 
-      return { interestRequest, chatRoom, chatMessage, notification };
+      await repo.createInquiryAuditLog(tx, {
+        inquiryId: interestRequest.id,
+        actorId: owner.id,
+        actorRole: owner.role,
+        action: status === "ACCEPTED" ? "ACCEPTED" : "DECLINED",
+        metadata: {
+          ownerMessage: trimmedOwnerMessage || null,
+          previousStatus: "PENDING",
+          status,
+        },
+      });
+
+      return { interestRequest, chatRoom, chatMessages, notification };
     });
   } catch (error) {
     if (error.code === "P2025") {
@@ -359,43 +588,70 @@ async function decideInterestRequest({ owner, interestRequestId, status }) {
     throw error;
   }
 
-  try {
-    void enqueueNotificationJob({
-      notificationId: result.notification.id,
-      userIds: [result.interestRequest.tenantId],
-      title: result.notification.title,
-      message: result.notification.message,
-      type: result.notification.type,
-      relatedId: result.notification.relatedId,
-      relatedType: result.notification.relatedType,
-    }).catch((enqueueError) => {
-      console.error(
-        "Failed to enqueue notification after interest decision:",
-        enqueueError,
-      );
-    });
-  } catch (enqueueError) {
-    console.error(
-      "Failed to enqueue notification after interest decision:",
-      enqueueError,
-    );
+  enqueueInterestNotification(
+    result.notification,
+    [result.interestRequest.tenantId],
+    "interest decision",
+  );
+
+  return {
+    interestRequest: result.interestRequest,
+    chatRoom: result.chatRoom,
+    chatMessages: result.chatMessages,
+    chatMessage: result.chatMessages[result.chatMessages.length - 1] || null,
+  };
+}
+
+function acceptInterestRequest({ owner, interestRequestId, ownerMessage }) {
+  return decideInterestRequest({
+    owner,
+    interestRequestId,
+    status: "ACCEPTED",
+    ownerMessage,
+  });
+}
+
+function rejectInterestRequest({ owner, interestRequestId, ownerMessage }) {
+  return decideInterestRequest({
+    owner,
+    interestRequestId,
+    status: "REJECTED",
+    ownerMessage,
+  });
+}
+
+function respondToInterestRequest({
+  owner,
+  interestRequestId,
+  action,
+  ownerMessage,
+}) {
+  const statusByAction = {
+    ACCEPT: "ACCEPTED",
+    DECLINE: "REJECTED",
+  };
+  const status = statusByAction[action];
+
+  if (!status) {
+    throw new InterestServiceError("INVALID_ACTION", "Unsupported action", 400);
   }
 
-  return result;
-}
-
-function acceptInterestRequest({ owner, interestRequestId }) {
-  return decideInterestRequest({ owner, interestRequestId, status: "ACCEPTED" });
-}
-
-function rejectInterestRequest({ owner, interestRequestId }) {
-  return decideInterestRequest({ owner, interestRequestId, status: "REJECTED" });
+  return decideInterestRequest({
+    owner,
+    interestRequestId,
+    status,
+    ownerMessage,
+  });
 }
 
 module.exports = {
   InterestServiceError,
   createInterestRequest,
   getPendingInterestRequests,
+  getInterestRequest,
+  deleteInterestRequestHistory,
   acceptInterestRequest,
   rejectInterestRequest,
+  respondToInterestRequest,
 };
+

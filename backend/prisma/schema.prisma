@@ -34,13 +34,21 @@ enum RefundStatus {
   REJECTED
 }
 
-enum InterestRequestStatus {
+enum InquiryStatus {
   PENDING
   ACCEPTED
   REJECTED
   CANCELLED
+
+  @@map("InterestRequestStatus")
 }
 
+enum InquiryAuditAction {
+  CREATED
+  ACCEPTED
+  DECLINED
+  DELETED_FROM_HISTORY
+}
 enum ChatMessageType {
   TEXT
   INTEREST_REQUEST
@@ -99,8 +107,8 @@ model User {
   subscriptions       Subscription[]
   tenantApproaches    Approach[]           @relation("TenantApproaches")
   ownerApproaches     Approach[]           @relation("OwnerApproaches")
-  tenantInterests     InterestRequest[]    @relation("TenantInterestRequests")
-  ownerInterests      InterestRequest[]    @relation("OwnerInterestRequests")
+  tenantInquiries    Inquiry[]           @relation("TenantInquiries")
+  ownerInquiries     Inquiry[]           @relation("OwnerInquiries")
   notifications       Notification[]
   deviceTokens        DeviceToken[]
 
@@ -169,13 +177,12 @@ model Listing {
   savedBy    SavedListing[]
   approaches Approach[]
   chatRooms  ChatRoom[]
-  interests  InterestRequest[]
+  inquiries  Inquiry[]
 
-  @@index([status, createdAt])
-  @@index([ownerId, status, createdAt])
-  @@index([city])
-  @@index([rent])
-  @@index([bedrooms, bathrooms])
+  @@index([status, createdAt, id])
+  @@index([ownerId, status, createdAt, id])
+  @@index([status, rent, createdAt, id])
+  @@index([status, bedrooms, bathrooms, createdAt, id])
 }
 
 model SavedListing {
@@ -231,28 +238,49 @@ model Approach {
   @@index([createdAt])
 }
 
-model InterestRequest {
+model Inquiry {
   id               String                @id @default(uuid())
   tenantId         String
-  tenant           User                  @relation("TenantInterestRequests", fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant           User                  @relation("TenantInquiries", fields: [tenantId], references: [id], onDelete: Cascade)
   ownerId          String
-  owner            User                  @relation("OwnerInterestRequests", fields: [ownerId], references: [id], onDelete: Cascade)
+  owner            User                  @relation("OwnerInquiries", fields: [ownerId], references: [id], onDelete: Cascade)
   propertyId       String
   property         Listing               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  status           InterestRequestStatus @default(PENDING)
+  tenantMessage    String
+  status           InquiryStatus         @default(PENDING)
+  ownerMessage     String?
+  respondedAt      DateTime?
+  tenantDeletedAt  DateTime?
+  ownerDeletedAt   DateTime?
   profileSnapshot  Json
   propertySnapshot Json
   createdAt        DateTime              @default(now())
   updatedAt        DateTime              @updatedAt
+  auditLogs        InquiryAuditLog[]
 
   @@index([tenantId])
   @@index([ownerId])
   @@index([propertyId])
   @@index([status])
   @@index([createdAt])
-  @@map("interest_requests")
+  @@map("inquiries")
 }
 
+model InquiryAuditLog {
+  id        String             @id @default(uuid())
+  inquiryId String
+  inquiry   Inquiry            @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  actorId   String?
+  actorRole String?
+  action    InquiryAuditAction
+  metadata  Json?
+  createdAt DateTime           @default(now())
+
+  @@index([inquiryId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@map("inquiry_audit_logs")
+}
 model Notification {
   id          String           @id @default(uuid())
   userId      String
@@ -383,3 +411,4 @@ model PartnerInquiry {
   @@index([status, createdAt])
   @@index([email])
 }
+

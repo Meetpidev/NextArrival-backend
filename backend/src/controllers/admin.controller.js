@@ -1,3 +1,5 @@
+const { childLogger } = require("../config/logger");
+const logger = childLogger("admin-controller");
 /*
  * Admin controller
  *
@@ -9,6 +11,10 @@
  */
 
 const { prisma } = require("../config/db");
+const {
+  clearListingCaches,
+  clearAcceptedPartnersCache,
+} = require("../config/cache");
 const {
   isZodError,
   sendValidationError,
@@ -50,7 +56,13 @@ exports.getAnalytics = async (req, res) => {
       where: { user: { verificationStatus: "PENDING_VERIFICATION" } },
     });
 
-    res.json({ totalTenants, totalOwners, totalListings, totalRevenue, totalVerificationsPending });
+    res.json({
+      totalTenants,
+      totalOwners,
+      totalListings,
+      totalRevenue,
+      totalVerificationsPending,
+    });
   } catch (err) {
     return sendServerError(res, err, "Failed to fetch analytics");
   }
@@ -124,25 +136,44 @@ exports.processVerification = async (req, res) => {
 
 exports.getListings = async (req, res) => {
   try {
-    const page = Math.max(Number(req.query.page) || 1, 1);
-    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
-    const skip = (page - 1) * limit;
+    const requestedLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Math.min(
+      Math.max(Number.isNaN(requestedLimit) ? 50 : requestedLimit, 1),
+      100,
+    );
+    const cursor =
+      typeof req.query.cursor === "string" && req.query.cursor.trim()
+        ? req.query.cursor.trim()
+        : null;
 
-    const [total, listings] = await Promise.all([
-      prisma.listing.count({ where: { status: { not: "ARCHIVED" } } }),
-      prisma.listing.findMany({
-        where: { status: { not: "ARCHIVED" } },
-        include: {
-          owner: { select: { id: true, fullName: true, email: true } },
-        },
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
-      }),
-    ]);
+    const listings = await prisma.listing.findMany({
+      where: { status: { not: "ARCHIVED" } },
+      include: {
+        owner: { select: { id: true, fullName: true, email: true } },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: limit + 1,
+    });
 
-    res.json({ total, page, limit, listings });
+    const hasNextPage = listings.length > limit;
+    const pageItems = hasNextPage ? listings.slice(0, limit) : listings;
+
+    res.json({
+      listings: pageItems,
+      pageInfo: {
+        limit,
+        hasNextPage,
+        nextCursor: hasNextPage
+          ? (pageItems[pageItems.length - 1]?.id ?? null)
+          : null,
+      },
+    });
   } catch (err) {
+    if (err.code === "P2025") {
+      return res.status(400).json({ error: "Invalid listing cursor" });
+    }
+
     return sendServerError(res, err, "Failed to fetch listings");
   }
 };
@@ -166,6 +197,7 @@ exports.moderateListing = async (req, res) => {
       data: { status, adminFeedback: feedback || null },
     });
 
+    clearListingCaches(listingId);
     res.json({ message: "Listing moderated successfully", status });
   } catch (err) {
     return sendServerError(
@@ -381,7 +413,9 @@ exports.moderateSubscription = async (req, res) => {
   try {
     const { subscriptionId, action } = req.body;
     if (!subscriptionId || !action) {
-      return res.status(400).json({ error: "Subscription ID and action are required" });
+      return res
+        .status(400)
+        .json({ error: "Subscription ID and action are required" });
     }
     if (!["APPROVE", "REJECT"].includes(action)) {
       return res.status(400).json({ error: "Invalid action" });
@@ -395,7 +429,9 @@ exports.moderateSubscription = async (req, res) => {
     }
 
     if (sub.status !== "PENDING") {
-      return res.status(400).json({ error: "Subscription is already processed" });
+      return res
+        .status(400)
+        .json({ error: "Subscription is already processed" });
     }
 
     const status = action === "APPROVE" ? "APPROVED" : "REJECTED";
@@ -410,7 +446,9 @@ exports.moderateSubscription = async (req, res) => {
         });
 
         const startDate = new Date();
-        const endDate = new Date(Date.now() + sub.durationDays * 24 * 60 * 60 * 1000);
+        const endDate = new Date(
+          Date.now() + sub.durationDays * 24 * 60 * 60 * 1000,
+        );
 
         await tx.subscription.update({
           where: { id: subscriptionId },
@@ -424,7 +462,11 @@ exports.moderateSubscription = async (req, res) => {
 
         // Check if urgent match addon was purchased
         const plan = SUBSCRIPTION_PLANS.find((p) => p.id === sub.planId);
-        const basePrice = plan ? (sub.isSubscription ? plan.priceSub : plan.priceOneTime) : sub.price;
+        const basePrice = plan
+          ? sub.isSubscription
+            ? plan.priceSub
+            : plan.priceOneTime
+          : sub.price;
         const hasUrgent = sub.price > basePrice;
 
         if (hasUrgent) {
@@ -441,7 +483,9 @@ exports.moderateSubscription = async (req, res) => {
       }
     });
 
-    res.json({ message: `Subscription ${action === "APPROVE" ? "approved" : "rejected"} successfully.` });
+    res.json({
+      message: `Subscription ${action === "APPROVE" ? "approved" : "rejected"} successfully.`,
+    });
   } catch (err) {
     return sendServerError(res, err, "Failed to moderate subscription");
   }
@@ -531,17 +575,17 @@ exports.updatePartnerRequestStatus = async (req, res) => {
     }
 
     const request = await updatePartnerRequestStatus({ id, status });
+    clearAcceptedPartnersCache();
 
     if (status === "ACCEPTED") {
       try {
-        const inserted = await googleSheetsService.addAcceptedPartnerToSheet(current);
+        const inserted =
+          await googleSheetsService.addAcceptedPartnerToSheet(current);
         if (!inserted) {
-          console.error(
-            `Accepted partner ${current.id} was saved in the database but not appended to Google Sheets`,
-          );
+          logger.error({ partnerId: current.id }, "Accepted partner saved in database but not appended to Google Sheets");
         }
       } catch (sheetError) {
-        console.error("Failed to append accepted partner to Google Sheet:", sheetError);
+        logger.error({ err: sheetError, partnerId: current.id }, "Failed to append accepted partner to Google Sheet");
       }
     }
 
@@ -552,7 +596,7 @@ exports.updatePartnerRequestStatus = async (req, res) => {
         status,
       });
     } catch (mailError) {
-      console.error("Partner decision email failed:", mailError);
+      logger.error({ err: mailError }, "Partner decision email failed");
     }
 
     return res.json({

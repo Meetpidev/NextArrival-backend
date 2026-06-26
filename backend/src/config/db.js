@@ -1,11 +1,15 @@
 const { Pool } = require("pg");
 const { PrismaPg } = require("@prisma/adapter-pg");
 const { PrismaClient } = require("@prisma/client");
+const { env } = require("./env");
+const { childLogger } = require("./logger");
 
-const connectionString = process.env.DATABASE_URL;
+const logger = childLogger("database");
+
+const connectionString = env.databaseUrl;
 
 if (!connectionString) {
-  console.error("DATABASE_URL is not defined in backend .env");
+  logger.error("DATABASE_URL is not defined in backend .env");
   process.exit(1);
 }
 
@@ -25,7 +29,7 @@ if (connectionString.startsWith("prisma+postgres://")) {
       }
     }
   } catch (e) {
-    console.error("Failed to parse proxy URL:", e);
+    logger.error({ err: e }, "Failed to parse proxy URL");
   }
 }
 
@@ -40,3 +44,4 @@ process.on("SIGINT", async () => {
 });
 
 module.exports = { prisma };
+

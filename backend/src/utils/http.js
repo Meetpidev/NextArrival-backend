@@ -1,4 +1,7 @@
 const { ZodError } = require("zod");
+const { childLogger } = require("../config/logger");
+
+const logger = childLogger("http-utils");
 
 function formatZodIssues(error) {
   // Zod v4 uses issues; keep errors as a fallback for older call sites.
@@ -30,8 +33,10 @@ function sendServerError(
   logMessage,
   publicMessage = "Internal server error",
 ) {
-  if (logMessage) {
-    console.error(logMessage);
+  if (logMessage instanceof Error) {
+    logger.error({ err: logMessage }, publicMessage);
+  } else if (logMessage) {
+    logger.error({ detail: logMessage }, publicMessage);
   }
 
   return res.status(500).json({ error: publicMessage });

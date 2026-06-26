@@ -5,7 +5,6 @@
  * - Security headers (helmet)
  * - CORS + cookie support
  * - JSON parsing + rate limiting
- * - Static serving for uploaded files
  * - Route wiring under /api/*
  * - Central error handling for JSON + multer upload errors
  */
@@ -14,10 +13,14 @@ require("dotenv/config");
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
-const path = require("path");
-const fs = require("fs");
 const helmet = require("helmet");
+const { env } = require("./config/env");
 const multer = require("multer");
+const compression = require("compression");
+const pinoHttp = require("pino-http");
+const { childLogger } = require("./config/logger");
+
+const logger = childLogger("app");
 
 // Rate limiter instances shared across route namespaces
 const {
@@ -38,12 +41,7 @@ const inquiryRoutes = require("./routes/inquiry.routes");
 const interestRoutes = require("./routes/interest.routes");
 const notificationRoutes = require("./routes/notification.routes");
 
-const DEFAULT_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"];
-const envOrigins = (process.env.CORS_ORIGINS || "")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-const allowedOrigins = Array.from(new Set([...DEFAULT_ORIGINS, ...envOrigins]));
+const allowedOrigins = env.corsOrigins;
 const corsOptions = {
   origin(origin, callback) {
     // Allow non-browser clients such as Postman/curl, plus known frontend origins.
@@ -57,27 +55,33 @@ const corsOptions = {
   optionsSuccessStatus: 204,
 };
 
-// Ensure uploads directory exists before serving it
-const uploadDir = path.join(__dirname, "..", "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
 const app = express();
 
-if (process.env.REQUEST_LOGGING === "true") {
-  app.use((req, res, next) => {
-    console.log(
-      `[Backend Request] ${req.method} ${req.path} - Received at ${new Date().toISOString()}`,
-    );
-    next();
-  });
+if (env.requestLogging) {
+  app.use(
+    pinoHttp({
+      logger: childLogger("http"),
+      customLogLevel(req, res, err) {
+        if (err || res.statusCode >= 500) return "error";
+        if (res.statusCode >= 400) return "warn";
+        return "info";
+      },
+      customSuccessMessage(req, res) {
+        return `${req.method} ${req.url} completed with ${res.statusCode}`;
+      },
+      customErrorMessage(req, res, err) {
+        return `${req.method} ${req.url} failed with ${res.statusCode}: ${err.message}`;
+      },
+    }),
+  );
 }
 
-if (process.env.NODE_ENV === "production") {
+if (env.isProduction) {
   app.set("trust proxy", 1);
 }
 app.disable("x-powered-by");
+
+app.use(compression());
 
 // Security and request parsing
 app.use(
@@ -92,10 +96,10 @@ app.options("*", cors(corsOptions));
 app.use(express.json({ limit: "10kb" })); // limit request body size
 app.use(cookieParser()); // parse Cookie header into req.cookies
 app.use(express.urlencoded({ extended: true, limit: "10kb" })); // parse URL-encoded bodies
-// Serve uploaded files (e.g. verification docs, listing photos)
-app.use("/uploads", express.static(uploadDir, { dotfiles: "deny" }));
-app.use("/test",(req,res) => {
-  res.send("Welcome to the backend API. Please use the /api endpoints for requests.");
+app.use("/test", (req, res) => {
+  res.send(
+    "Welcome to the backend API. Please use the /api endpoints for requests.",
+  );
 });
 // Health check stays DB-independent so load balancers can test process liveness.
 app.get("/api/health", publicLimiter, (req, res) => {
@@ -114,6 +118,7 @@ app.use("/api/cms", publicLimiter);
 app.use("/api/contact", publicLimiter);
 app.use("/api/partner", publicLimiter);
 app.use("/api/interests", publicLimiter);
+app.use("/api/inquiries", publicLimiter);
 app.use("/api/notifications", publicLimiter);
 app.use("/api/admin", adminLimiter);
 
@@ -125,6 +130,7 @@ app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/cms", cmsRoutes);
 app.use("/api/interests", interestRoutes);
+app.use("/api/inquiries", interestRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api", inquiryRoutes);
 
@@ -146,7 +152,7 @@ app.use((err, req, res, next) => {
 
   if (err instanceof multer.MulterError) {
     const multerMessages = {
-      LIMIT_FILE_SIZE: "Uploaded file must not exceed 2MB",
+      LIMIT_FILE_SIZE: "Uploaded file must not exceed 5MB",
       LIMIT_UNEXPECTED_FILE: "Upload field must be named file",
       LIMIT_PART_COUNT: "Too many upload parts",
       LIMIT_FILE_COUNT: "Only one file can be uploaded at a time",
@@ -162,7 +168,7 @@ app.use((err, req, res, next) => {
     return res.status(400).json({ error: err.message });
   }
 
-  console.error("Unhandled request error:", err);
+  (req.log || logger).error({ err }, "Unhandled request error");
   return res.status(500).json({ error: "Internal server error" });
 });
 
